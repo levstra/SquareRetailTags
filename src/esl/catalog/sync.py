@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -11,13 +12,12 @@ from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import build_projection
 
-CURSOR_ID = "catalog"
 
-
-async def sync_catalog(session: AsyncSession) -> dict:
+async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
+    """Delta-sync one business's catalog. `session` must be scoped to it."""
     client = get_client()
 
-    row = await session.get(SyncCursor, CURSOR_ID)
+    row = await session.get(SyncCursor, business_id)
     begin_time: str | None = row.latest_time if row else None
 
     items_upserted = 0
@@ -46,9 +46,9 @@ async def sync_catalog(session: AsyncSession) -> dict:
 
             await session.execute(
                 insert(CatalogItem)
-                .values(id=obj.id, name=obj.item_data.name, updated_at=updated_at)
+                .values(business_id=business_id, id=obj.id, name=obj.item_data.name, updated_at=updated_at)
                 .on_conflict_do_update(
-                    index_elements=["id"],
+                    index_elements=["business_id", "id"],
                     set_={"name": obj.item_data.name, "updated_at": updated_at},
                 )
             )
@@ -65,6 +65,7 @@ async def sync_catalog(session: AsyncSession) -> dict:
                 await session.execute(
                     insert(CatalogVariation)
                     .values(
+                        business_id=business_id,
                         id=var.id,
                         item_id=obj.id,
                         variation_name=vd.name or "",
@@ -74,7 +75,7 @@ async def sync_catalog(session: AsyncSession) -> dict:
                         updated_at=var_updated_at,
                     )
                     .on_conflict_do_update(
-                        index_elements=["id"],
+                        index_elements=["business_id", "id"],
                         set_={
                             "item_id": obj.id,
                             "variation_name": vd.name or "",
@@ -123,9 +124,9 @@ async def sync_catalog(session: AsyncSession) -> dict:
     if latest_time:
         await session.execute(
             insert(SyncCursor)
-            .values(id=CURSOR_ID, latest_time=latest_time)
+            .values(business_id=business_id, latest_time=latest_time)
             .on_conflict_do_update(
-                index_elements=["id"],
+                index_elements=["business_id"],
                 set_={"latest_time": latest_time},
             )
         )

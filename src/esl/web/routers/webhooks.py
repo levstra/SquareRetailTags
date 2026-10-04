@@ -1,12 +1,13 @@
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from square.utils.webhooks_helper import verify_signature
 
 from esl.catalog.sync import sync_catalog
 from esl.config import settings
-from esl.db import AsyncSessionLocal
+from esl.db import business_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -15,9 +16,12 @@ CATALOG_UPDATED = "catalog.version.updated"
 
 
 async def _run_sync() -> None:
-    async with AsyncSessionLocal() as session:
-        result = await sync_catalog(session)
-        logger.info("webhook sync complete: %s", result)
+    # TEMPORARY single-business mode. Step 3 resolves the business from the
+    # event's merchant_id via businesses.square_merchant_id.
+    business_id = uuid.UUID(settings.default_business_id)
+    async with business_session(business_id) as session:
+        result = await sync_catalog(session, business_id)
+        logger.info("webhook sync complete for business %s: %s", business_id, result)
 
 
 @router.post("/webhooks/square", status_code=200)
