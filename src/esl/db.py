@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
@@ -14,6 +14,27 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+class UnsafeDatabaseLogin(RuntimeError):
+    """The app's DB login can bypass row-level security."""
+
+
+async def assert_rls_enforced(eng: AsyncEngine) -> None:
+    """Refuse a login that is superuser or BYPASSRLS: RLS would silently be off."""
+    async with eng.connect() as conn:
+        row = (
+            await conn.execute(
+                text("select rolsuper or rolbypassrls, current_user from pg_roles "
+                     "where rolname = current_user")
+            )
+        ).one()
+    if row[0]:
+        raise UnsafeDatabaseLogin(
+            f"DATABASE_URL connects as '{row[1]}', which is a superuser or has BYPASSRLS. "
+            "Row-level security would not be enforced. Use a plain login "
+            "(migrations belong on ADMIN_DATABASE_URL)."
+        )
 
 
 def scope_to_business(session: AsyncSession, business_id: uuid.UUID) -> None:
