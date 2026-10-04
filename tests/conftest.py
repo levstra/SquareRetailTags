@@ -8,6 +8,7 @@ import asyncio
 import os
 
 from tests.dbutil import PG, admin_url, migrate, recreate_database, run_sql
+from tests.seed import seed_two_businesses
 
 ADMIN_URL = admin_url("esl_test")
 APP_URL = f"postgresql+asyncpg://esl_app_test:esl_app_test@{PG}/esl_test"
@@ -37,7 +38,7 @@ END $$
 def test_database():
     asyncio.run(recreate_database("esl_test"))
     migrate(ADMIN_URL)
-    asyncio.run(run_sql(ADMIN_URL, [(APP_LOGIN_SQL, {})]))
+    asyncio.run(run_sql(ADMIN_URL, [(APP_LOGIN_SQL, {}), ("GRANT esl_app TO esl_app_test", {})]))
 
 
 @pytest.fixture
@@ -56,3 +57,20 @@ async def client():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def two_businesses():
+    # Start clean: CASCADE empties every table that references businesses
+    # (including the default business created by migration 0002).
+    await run_sql(ADMIN_URL, [("TRUNCATE businesses CASCADE", {})])
+    await seed_two_businesses(ADMIN_URL)
+
+
+@pytest.fixture
+async def app_conn():
+    """Raw connection as the RLS-restricted app login, no business set."""
+    engine = create_async_engine(APP_URL, poolclass=NullPool)
+    async with engine.connect() as conn:
+        yield conn
+    await engine.dispose()
