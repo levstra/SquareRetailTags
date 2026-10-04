@@ -10,6 +10,8 @@ import {
 import { useState } from "react";
 import { api } from "./api/client";
 import type { components } from "./api/schema.d.ts";
+import { signOut } from "./auth/userManager";
+import { StaffPanel } from "./staff/StaffPanel";
 
 type Tag = components["schemas"]["Tag"];
 type Variation = components["schemas"]["Variation"];
@@ -296,27 +298,66 @@ export default function App() {
   const [modal, setModal] = useState<
     { tagId: string; variationId?: string | null } | "new" | null
   >(null);
+  const [tab, setTab] = useState<"tags" | "staff">("tags");
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/me");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const tabClass = (t: typeof tab) =>
+    `px-3 py-1.5 text-sm rounded ${tab === t ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`;
 
   return (
     <div className="min-h-screen bg-white">
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-gray-900">
-          ESL Pricing — Tag Dashboard
-        </h1>
-        <button
-          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-          onClick={() => setModal("new")}
-        >
-          + Add Tag
-        </button>
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold text-gray-900">
+            {me?.business.name ?? "ESL Pricing"}
+          </h1>
+          <nav className="flex gap-1">
+            <button className={tabClass("tags")} onClick={() => setTab("tags")}>
+              Tags
+            </button>
+            {me?.role === "owner" && (
+              <button className={tabClass("staff")} onClick={() => setTab("staff")}>
+                Staff
+              </button>
+            )}
+          </nav>
+        </div>
+        <div className="flex items-center gap-3">
+          {tab === "tags" && (
+            <button
+              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              onClick={() => setModal("new")}
+            >
+              + Add Tag
+            </button>
+          )}
+          <span className="text-sm text-gray-500">
+            {me?.email} · {me?.role}
+          </span>
+          <button className="text-sm underline text-gray-600" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <main className="p-6">
-        <TagGrid
-          onAssign={(tag) =>
-            setModal({ tagId: tag.id, variationId: tag.variation_id })
-          }
-        />
+        {tab === "tags" ? (
+          <TagGrid
+            onAssign={(tag) =>
+              setModal({ tagId: tag.id, variationId: tag.variation_id })
+            }
+          />
+        ) : (
+          <StaffPanel />
+        )}
       </main>
 
       {modal !== null && (
