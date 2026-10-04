@@ -49,9 +49,18 @@ immediately instead of waiting for the next scheduled poll.
 
 ```bash
 docker compose up -d      # postgres + redis
-make migrate               # alembic upgrade head
+make migrate               # alembic upgrade head (uses ADMIN_DATABASE_URL)
 make dev                   # uvicorn (port 8001) + vite, together
 ```
+
+The app connects as `esl_app_dev`, a login subject to Postgres row-level
+security; migrations use the `esl` owner login (`ADMIN_DATABASE_URL`).
+`Start-Dev.ps1` creates `esl_app_dev` automatically; without it, run
+`scripts/sql/dev_app_login.sql` once against the dev database. Copy both
+`DATABASE_URL` lines from `.env.example` into your `.env`.
+
+Tests need the same Postgres running; they create and use an `esl_test`
+database and never touch your dev data.
 
 `pytest` runs against recorded Square fixtures in `tests/fixtures/square/`,
 not the live sandbox.
