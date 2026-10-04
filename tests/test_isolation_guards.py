@@ -8,6 +8,9 @@ from esl.web.deps import get_business_session
 # Routes that touch no business data, or resolve the business themselves.
 UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square"}
 
+# Known scoped routes that must exist and be checked.
+REQUIRED_SCOPED_ROUTES = {"/v1/tags", "/v1/tags/{tag_id}", "/v1/tags/{tag_id}/confirm", "/v1/catalog/variations"}
+
 
 async def test_every_business_table_has_forced_rls(admin_session):
     rows = (await admin_session.execute(text("""
@@ -38,24 +41,40 @@ def _dependency_calls(dependant):
 
 
 def test_every_route_uses_business_session():
-    # Unwrap _IncludedRouter objects to find actual APIRoute objects with full paths
+    # FastAPI 0.141.1 wraps router includes in _IncludedRouter, which is not
+    # an APIRoute. We can't simply filter app.routes on isinstance(APIRoute).
+    # Instead, use effective_route_contexts() to flatten nested includes and
+    # get the full path and dependant for each route.
     routes_with_paths = []
+
     for route in app.routes:
         if isinstance(route, APIRoute):
+            # Starlette/OpenAPI doc routes (not router-included API routes)
             routes_with_paths.append((route.path, route))
-        elif hasattr(route, 'original_router') and hasattr(route, 'include_context'):
-            # _IncludedRouter: extract the actual routes and add the prefix
-            prefix = route.include_context.prefix or ""
-            for sub_route in route.original_router.routes:
-                if isinstance(sub_route, APIRoute):
-                    full_path = prefix + sub_route.path
-                    routes_with_paths.append((full_path, sub_route))
+        elif hasattr(route, 'effective_route_contexts'):
+            # _IncludedRouter: flatten nested includes
+            for context in route.effective_route_contexts():
+                full_path = context.path
+                routes_with_paths.append((full_path, context))
+        elif hasattr(route, 'path') and any(route.path.startswith(p) for p in ['/openapi', '/docs', '/redoc']):
+            # Built-in Starlette routes for OpenAPI/docs (skip, not part of business API)
+            pass
+        else:
+            # Unknown route type; fail hard
+            assert False, f"Unexpected route type {type(route).__name__}: {route}"
+
+    # Floor assertion: ensure we found the known routes (prevents vacuous pass)
+    collected_paths = {path for path, _ in routes_with_paths}
+    assert REQUIRED_SCOPED_ROUTES <= collected_paths, (
+        f"Missing required routes. Found: {collected_paths}, "
+        f"Expected at least: {REQUIRED_SCOPED_ROUTES}"
+    )
 
     unscoped = [
         full_path
-        for full_path, route in routes_with_paths
+        for full_path, route_or_context in routes_with_paths
         if full_path not in UNSCOPED_ROUTES
-        and get_business_session not in set(_dependency_calls(route.dependant))
+        and get_business_session not in set(_dependency_calls(route_or_context.dependant))
     ]
     assert unscoped == []
 
