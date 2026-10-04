@@ -18,26 +18,43 @@ function StoreChecklist({
   stores,
   selected,
   onChange,
+  disabled = false,
 }: {
   stores: Store[];
   selected: string[];
   onChange: (ids: string[]) => void;
+  disabled?: boolean;
 }) {
+  // No selected stores means every store, so "All stores" is its own explicit
+  // choice and the last specific store can't be unchecked into it by accident.
+  const all = selected.length === 0;
   return (
     <div className="flex flex-wrap gap-3">
+      <label className="flex items-center gap-1 text-sm">
+        <input
+          type="checkbox"
+          checked={all}
+          disabled={disabled}
+          onChange={(e) => {
+            if (e.target.checked) onChange([]);
+          }}
+        />
+        All stores
+      </label>
       {stores.map((s) => (
         <label key={s.id} className="flex items-center gap-1 text-sm">
           <input
             type="checkbox"
             checked={selected.includes(s.id)}
-            onChange={(e) =>
-              onChange(e.target.checked ? [...selected, s.id] : selected.filter((id) => id !== s.id))
-            }
+            disabled={disabled}
+            onChange={(e) => {
+              if (e.target.checked) onChange([...selected, s.id]);
+              else if (selected.length > 1) onChange(selected.filter((id) => id !== s.id));
+            }}
           />
           {s.name}
         </label>
       ))}
-      <span className="text-xs text-gray-400">{selected.length === 0 ? "All stores" : ""}</span>
     </div>
   );
 }
@@ -94,6 +111,7 @@ export function StaffPanel() {
   });
 
   const allStores = stores.data ?? [];
+  const pendingId = update.isPending ? update.variables?.id : undefined;
 
   return (
     <section className="space-y-6">
@@ -149,6 +167,7 @@ export function StaffPanel() {
                   <StoreChecklist
                     stores={allStores}
                     selected={u.store_ids}
+                    disabled={pendingId === u.id}
                     onChange={(ids) => update.mutate({ id: u.id, body: { store_ids: ids } })}
                   />
                 )}
@@ -156,7 +175,8 @@ export function StaffPanel() {
               <td className="text-right">
                 {u.role === "staff" && (
                   <button
-                    className="text-sm underline"
+                    className="text-sm underline disabled:opacity-50"
+                    disabled={pendingId === u.id}
                     onClick={() => update.mutate({ id: u.id, body: { disabled: !u.disabled } })}
                   >
                     {u.disabled ? "Enable" : "Disable"}
