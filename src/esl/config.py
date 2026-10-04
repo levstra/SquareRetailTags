@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     square_api_version: str = "2026-05-20"
     square_webhook_signature_key: str = ""
     square_webhook_url: str = ""
+    # Cognito user pool for dashboard sign-in (rollout step 2). Empty = sign-in
+    # not configured; authenticated endpoints answer 503.
+    cognito_region: str = ""
+    cognito_user_pool_id: str = ""
+    cognito_app_client_id: str = ""
 
 
 settings = Settings()
