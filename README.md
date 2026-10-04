@@ -74,6 +74,8 @@ python scripts/gateway_sim.py --url http://localhost:8001 --interval 5
 
 It polls `/v1/tags`, "renders" any tag whose hash changed, and posts a
 confirmation back — exactly the loop the real gateway should implement.
+(These endpoints now require a dashboard sign-in token, `Authorization: Bearer`,
+until step 4 replaces them with the Pi contract.)
 
 ### Sign-in (Cognito)
 
@@ -95,6 +97,8 @@ Owners invite staff from the dashboard's Staff tab.
 This is the contract the hardware side needs to implement. Full schema
 detail lives in `api/esl-pricing-api.yaml` — treat that file as the source
 of truth if anything here goes stale. Base path is `/v1`.
+Until step 4 replaces these with the Pi contract, they require a dashboard
+sign-in token (`Authorization: Bearer <access token>`).
 
 ### 1. `GET /tags` — poll for changes
 

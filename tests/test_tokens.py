@@ -1,8 +1,8 @@
 import jwt
 import pytest
 
-from esl.auth.tokens import InvalidToken
-from tests.auth import OTHER_KEY, make_token, make_verifier
+from esl.auth.tokens import InvalidToken, SignInUnavailable, TokenVerifier
+from tests.auth import CLIENT_ID, ISSUER, OTHER_KEY, make_token, make_verifier
 
 
 def test_valid_access_token_returns_sub():
@@ -26,3 +26,13 @@ def test_unsigned_token_rejected():
     token = jwt.encode({"sub": "s", "token_use": "access"}, key=None, algorithm="none")
     with pytest.raises(InvalidToken):
         make_verifier().verify(token)
+
+
+def _unreachable_jwks(_token):
+    raise jwt.PyJWKClientConnectionError("Fail to fetch data from the url")
+
+
+def test_unreachable_signing_keys_is_not_an_invalid_token():
+    verifier = TokenVerifier(issuer=ISSUER, client_id=CLIENT_ID, key_resolver=_unreachable_jwks)
+    with pytest.raises(SignInUnavailable):
+        verifier.verify(make_token("s"))

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.accounts.identity import IdentityError, IdentityProvider, make_identity_provider
 from esl.auth.current_user import CurrentUser, load_current_user
-from esl.auth.tokens import InvalidToken, TokenVerifier, cognito_verifier
+from esl.auth.tokens import InvalidToken, SignInUnavailable, TokenVerifier, cognito_verifier
 from esl.config import settings
 from esl.db import AsyncSessionLocal, business_session
 
@@ -51,6 +51,8 @@ async def get_current_user(
     try:
         # verify() may fetch Cognito's JWKS on first use; keep it off the event loop.
         sub = await asyncio.to_thread(verifier.verify, credentials.credentials)
+    except SignInUnavailable:
+        raise HTTPException(status_code=503, detail="Sign-in is temporarily unavailable")
     except InvalidToken:
         raise HTTPException(status_code=401, detail="Invalid or expired token", headers=_UNAUTHORIZED)
 

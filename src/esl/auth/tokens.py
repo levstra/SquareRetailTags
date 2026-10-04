@@ -8,6 +8,10 @@ class InvalidToken(Exception):
     """The bearer token is missing, malformed, expired, or not ours."""
 
 
+class SignInUnavailable(Exception):
+    """The identity provider's signing keys couldn't be fetched."""
+
+
 KeyResolver = Callable[[str], Any]
 
 
@@ -31,6 +35,8 @@ class TokenVerifier:
                 # Access tokens carry client_id, not aud.
                 options={"require": ["exp", "iat", "iss", "sub"], "verify_aud": False},
             )
+        except jwt.PyJWKClientConnectionError as exc:
+            raise SignInUnavailable(str(exc)) from exc
         except jwt.PyJWTError as exc:
             raise InvalidToken(str(exc)) from exc
         if claims.get("token_use") != "access":

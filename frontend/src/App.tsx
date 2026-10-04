@@ -8,7 +8,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useState } from "react";
-import { api } from "./api/client";
+import { api, clearRedirectMarker } from "./api/client";
 import type { components } from "./api/schema.d.ts";
 import { signOut } from "./auth/userManager";
 import { StaffPanel } from "./staff/StaffPanel";
@@ -305,6 +305,7 @@ export default function App() {
     queryFn: async () => {
       const { data, error } = await api.GET("/me");
       if (error) throw error;
+      clearRedirectMarker();
       return data;
     },
     retry: false,
@@ -318,10 +319,13 @@ export default function App() {
       typeof meError === "object" && "detail" in meError && typeof meError.detail === "string"
         ? meError.detail
         : null;
+    const meUnauthorized = detail === "Invalid or expired token" || detail === "Sign in required";
     return (
       <div className="p-6 space-y-3">
         <p className="text-sm text-red-600">
-          {detail ?? "Your account doesn't have access to this dashboard."}
+          {meUnauthorized
+            ? "We couldn't verify your sign-in. Try signing out and in again; if it keeps happening, sign-in may be misconfigured."
+            : (detail ?? "Your account doesn't have access to this dashboard.")}
         </p>
         <button className="text-sm underline text-gray-600" onClick={() => void signOut()}>
           Sign out

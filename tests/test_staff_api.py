@@ -61,5 +61,15 @@ async def test_update_staff_stores_and_disable(client, fake_idp):
 
 async def test_update_rules(client, fake_idp):
     assert (await client.patch(f"/v1/staff/{OWNER_A}", json={"disabled": True})).status_code == 403
+    by_staff = await client.patch(
+        f"/v1/staff/{STAFF_A}", json={"disabled": True}, headers=bearer(STAFF_A_SUB))
+    assert by_staff.status_code == 403
     other_business_user = "00000000-0000-0000-0000-00000000bb01"
     assert (await client.patch(f"/v1/staff/{other_business_user}", json={"disabled": True})).status_code == 404
+
+
+async def test_invite_email_with_existing_row_is_409_and_leaves_no_identity(client, fake_idp):
+    # owner@a.test has a users row but the fake IdP has no identity for it.
+    response = await client.post("/v1/staff", json={"email": "owner@a.test"})
+    assert response.status_code == 409
+    assert "owner@a.test" not in fake_idp.users

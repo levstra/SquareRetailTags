@@ -59,3 +59,12 @@ async def test_user_store_cannot_point_at_other_business_store(admin_session):
         await admin_session.execute(text(
             "insert into user_stores (user_id, store_id, business_id) values (:u, :s, :a)"
         ), {"u": STAFF_A, "s": STORE_B, "a": BUSINESS_A})
+
+
+async def test_auth_lookup_function_owner_bypasses_rls(admin_session):
+    # esl_auth_user only sees through FORCE RLS if its owner bypasses RLS.
+    row = (await admin_session.execute(text(
+        "select r.rolsuper, r.rolbypassrls from pg_proc p "
+        "join pg_roles r on r.oid = p.proowner where p.proname = 'esl_auth_user'"
+    ))).one()
+    assert row.rolsuper or row.rolbypassrls

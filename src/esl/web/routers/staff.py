@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.accounts.identity import EmailAlreadyRegistered, IdentityError, IdentityProvider
@@ -78,7 +79,7 @@ async def invite_staff(
                                  role="staff", store_ids=frozenset(body.store_ids))
     except UnknownStore:
         raise HTTPException(status_code=400, detail="Unknown store")
-    except EmailAlreadyRegistered:
+    except (EmailAlreadyRegistered, IntegrityError):
         raise HTTPException(status_code=409, detail="This email can't be invited")
     except IdentityError:
         raise HTTPException(status_code=502, detail="Couldn't send the invitation. Try again.")

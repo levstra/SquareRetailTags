@@ -77,3 +77,20 @@ async def test_signin_not_configured_is_503(anon_client, monkeypatch):
     monkeypatch.setattr(settings, "cognito_user_pool_id", "")
     response = await anon_client.get("/v1/tags", headers=bearer(OWNER_B_SUB))
     assert response.status_code == 503
+
+
+async def test_unreachable_signing_keys_is_503_not_401(anon_client):
+    import jwt
+
+    from esl.auth.tokens import TokenVerifier
+    from esl.web.app import app
+    from esl.web.deps import get_token_verifier
+    from tests.auth import CLIENT_ID, ISSUER
+
+    def unreachable(_token):
+        raise jwt.PyJWKClientConnectionError("Fail to fetch data from the url")
+
+    app.dependency_overrides[get_token_verifier] = lambda: TokenVerifier(
+        issuer=ISSUER, client_id=CLIENT_ID, key_resolver=unreachable)
+    response = await anon_client.get("/v1/tags", headers=bearer(OWNER_B_SUB))
+    assert response.status_code == 503
