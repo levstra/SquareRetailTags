@@ -164,7 +164,26 @@ export interface components {
             detail: string;
         };
     };
-    responses: never;
+    responses: {
+        /** @description Not signed in, or the token is invalid or expired. */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Signed in, but this user may not do this. */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
     headers: never;
@@ -210,6 +229,8 @@ export interface operations {
                     "application/json": components["schemas"]["VariationList"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listTags: {
@@ -230,6 +251,8 @@ export interface operations {
                     "application/json": components["schemas"]["TagList"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getTag: {
@@ -252,6 +275,8 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description Tag not found */
             404: {
                 headers: {
@@ -287,6 +312,8 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description variation_id not found in catalog */
             404: {
                 headers: {
@@ -329,6 +356,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description Tag not found */
             404: {
                 headers: {

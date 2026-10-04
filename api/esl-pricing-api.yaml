@@ -4,17 +4,23 @@ info:
   title: ESL Pricing API
   version: "0.1.0"
   description: >
-    Contract between the ESL Pricing Service and the Raspberry Pi gateway.
-    The gateway polls this API for desired tag state and reports back confirmations.
+    Dashboard API of the ESL Pricing Service. Every operation requires a
+    Cognito access token (`Authorization: Bearer`) unless it declares
+    `security: []`. The Pi gateway's contract is separate
+    (WestgateLabels/docs/CENTRAL-API-CONTRACT.md) and arrives in step 4.
 
 servers:
   - url: /v1
+
+security:
+  - cognitoBearer: []
 
 paths:
   /health:
     get:
       operationId: getHealth
       summary: Health check
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -28,6 +34,10 @@ paths:
       operationId: listVariations
       summary: List all catalog variations for tag assignment
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: All known variations with parent item name
           content:
@@ -44,6 +54,10 @@ paths:
         Returns all known tags. The gateway compares content_hash against what
         it last rendered; if different, it fetches and pushes the new content.
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: List of tags
           content:
@@ -62,6 +76,10 @@ paths:
       operationId: getTag
       summary: Get desired display state for a single tag
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: Tag desired state
           content:
@@ -88,6 +106,10 @@ paths:
             schema:
               $ref: "#/components/schemas/AssignBody"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: Tag after assignment
           content:
@@ -129,6 +151,10 @@ paths:
             schema:
               $ref: "#/components/schemas/ConfirmBody"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204":
           description: Confirmation recorded
         "404":
@@ -139,6 +165,27 @@ paths:
                 $ref: "#/components/schemas/Error"
 
 components:
+  securitySchemes:
+    cognitoBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito access token for the dashboard app client.
+
+  responses:
+    Unauthorized:
+      description: Not signed in, or the token is invalid or expired.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Signed in, but this user may not do this.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
   schemas:
     TagId:
       type: string

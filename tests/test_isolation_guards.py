@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 import esl.db
 from esl.web.app import app
-from esl.web.deps import get_business_session
+from esl.web.deps import get_business_session, get_current_user
 
 # Routes that touch no business data, or resolve the business themselves.
 UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square"}
@@ -77,6 +77,14 @@ def test_every_route_uses_business_session():
         and get_business_session not in set(_dependency_calls(route_or_context.dependant))
     ]
     assert unscoped == []
+
+    anonymous = [
+        full_path
+        for full_path, route_or_context in routes_with_paths
+        if full_path not in UNSCOPED_ROUTES
+        and get_current_user not in set(_dependency_calls(route_or_context.dependant))
+    ]
+    assert anonymous == []
 
 
 def test_unscoped_session_helper_is_gone():

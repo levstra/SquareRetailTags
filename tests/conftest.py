@@ -24,6 +24,9 @@ import pytest  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+from tests.auth import bearer, make_verifier  # noqa: E402
+from tests.seed import OWNER_A_SUB  # noqa: E402
+
 APP_LOGIN_SQL = """
 DO $$
 BEGIN
@@ -49,12 +52,28 @@ async def admin_session():
     await engine.dispose()
 
 
+async def _app_client(headers: dict[str, str]):
+    from esl.web.app import app
+    from esl.web.deps import get_token_verifier
+
+    app.dependency_overrides[get_token_verifier] = make_verifier
+    transport = httpx.ASGITransport(app=app)
+    return app, httpx.AsyncClient(transport=transport, base_url="http://test", headers=headers)
+
+
 @pytest.fixture
 async def client():
-    from esl.web.app import app
+    """Signed in as business A's owner. Pass headers=bearer(...) per request to act as someone else."""
+    app, c = await _app_client(bearer(OWNER_A_SUB))
+    async with c:
+        yield c
+    app.dependency_overrides.clear()
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+
+@pytest.fixture
+async def anon_client():
+    app, c = await _app_client({})
+    async with c:
         yield c
     app.dependency_overrides.clear()
 

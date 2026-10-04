@@ -8,12 +8,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
 from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import UNASSIGNED, build_projection
-from esl.web.deps import get_business_session, get_request_business_id
+from esl.web.deps import get_business_session, get_current_user, get_request_business_id
 
 router = APIRouter()
 
@@ -84,34 +85,50 @@ _TAG_OPTIONS = [
 ]
 
 
+def _ensure_store_allowed(user: CurrentUser, store_id: uuid.UUID) -> None:
+    if not user.can_use_store(store_id):
+        raise HTTPException(status_code=403, detail="You don't have access to this store")
+
+
 @router.get("/tags", response_model=TagListResponse)
-async def list_tags(session: AsyncSession = Depends(get_business_session)):
-    tags = (
-        await session.execute(select(Tag).options(*_TAG_OPTIONS))
-    ).scalars().all()
+async def list_tags(
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
+):
+    query = select(Tag).options(*_TAG_OPTIONS)
+    if user.store_ids is not None:
+        query = query.where(Tag.store_id.in_(user.store_ids))
+    tags = (await session.execute(query)).scalars().all()
     return TagListResponse(tags=[_tag_to_response(t) for t in tags])
 
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)
-async def get_tag(tag_id: str, session: AsyncSession = Depends(get_business_session)):
+async def get_tag(
+    tag_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
+):
     tag_id = _normalize_tag_id(tag_id)
     tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
     if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
+    _ensure_store_allowed(user, tag.store_id)
     return _tag_to_response(tag)
 
 
-async def _default_store_id(session: AsyncSession) -> uuid.UUID | None:
-    # New tags go to the business's first store until pairing picks a store.
-    return (
-        await session.execute(select(Store.id).order_by(Store.created_at, Store.id).limit(1))
-    ).scalar_one_or_none()
+async def _default_store_id(session: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
+    # New tags go to the first store this user may use, until pairing picks a store.
+    query = select(Store.id).order_by(Store.created_at, Store.id).limit(1)
+    if user.store_ids is not None:
+        query = query.where(Store.id.in_(user.store_ids))
+    return (await session.execute(query)).scalar_one_or_none()
 
 
 @router.put("/tags/{tag_id}", response_model=TagResponse)
 async def assign_tag(
     tag_id: str,
     body: AssignBody,
+    user: CurrentUser = Depends(get_current_user),
     business_id: uuid.UUID = Depends(get_request_business_id),
     session: AsyncSession = Depends(get_business_session),
 ):
@@ -129,11 +146,13 @@ async def assign_tag(
 
     tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
     if tag is None:
-        store_id = await _default_store_id(session)
+        store_id = await _default_store_id(session, user)
         if store_id is None:
             raise HTTPException(status_code=409, detail="Business has no stores")
         tag = Tag(id=tag_id, business_id=business_id, store_id=store_id)
         session.add(tag)
+    else:
+        _ensure_store_allowed(user, tag.store_id)
 
     tag.variation_id = body.variation_id
 
