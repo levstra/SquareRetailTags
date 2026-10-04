@@ -6,11 +6,23 @@ from tests.dbutil import run_sql
 BUSINESS_A = uuid.UUID("00000000-0000-0000-0000-000000000001")  # == default_business_id
 BUSINESS_B = uuid.UUID("00000000-0000-0000-0000-000000000002")
 STORE_A = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
+STORE_A2 = uuid.UUID("00000000-0000-0000-0000-0000000000a2")
 STORE_B = uuid.UUID("00000000-0000-0000-0000-0000000000b1")
 TAG_A = "AAAAAAAAAAA1"
 TAG_B = "BBBBBBBBBBB1"
+OWNER_A = uuid.UUID("00000000-0000-0000-0000-00000000aa01")
+STAFF_A = uuid.UUID("00000000-0000-0000-0000-00000000aa02")
+DISABLED_A = uuid.UUID("00000000-0000-0000-0000-00000000aa03")
+OWNER_B = uuid.UUID("00000000-0000-0000-0000-00000000bb01")
+OWNER_A_SUB = "sub-owner-a"
+STAFF_A_SUB = "sub-staff-a"
+DISABLED_A_SUB = "sub-disabled-a"
+OWNER_B_SUB = "sub-owner-b"
 
-BUSINESS_TABLES = ["businesses", "stores", "catalog_items", "catalog_variations", "sync_cursors", "tags"]
+BUSINESS_TABLES = [
+    "businesses", "stores", "catalog_items", "catalog_variations", "sync_cursors", "tags",
+    "users", "user_stores",
+]
 
 
 def owner_column(table: str) -> str:
@@ -18,10 +30,12 @@ def owner_column(table: str) -> str:
 
 
 async def seed_two_businesses(url: str) -> None:
-    p = {"a": BUSINESS_A, "b": BUSINESS_B, "sa": STORE_A, "sb": STORE_B, "ta": TAG_A, "tb": TAG_B}
+    p = {"a": BUSINESS_A, "b": BUSINESS_B, "sa": STORE_A, "sa2": STORE_A2, "sb": STORE_B,
+         "ta": TAG_A, "tb": TAG_B, "oa": OWNER_A, "sta": STAFF_A, "da": DISABLED_A, "ob": OWNER_B}
     await run_sql(url, [
         ("INSERT INTO businesses (id, name) VALUES (:a, 'Business A'), (:b, 'Business B')", p),
-        ("INSERT INTO stores (id, business_id, name) VALUES (:sa, :a, 'Store A'), (:sb, :b, 'Store B')", p),
+        ("INSERT INTO stores (id, business_id, name) VALUES "
+         "(:sa, :a, 'Store A'), (:sa2, :a, 'Store A2'), (:sb, :b, 'Store B')", p),
         ("INSERT INTO catalog_items (business_id, id, name, updated_at) VALUES "
          "(:a, 'ITEM_A', 'Item A', now()), (:b, 'ITEM_B', 'Item B', now())", p),
         ("INSERT INTO catalog_variations "
@@ -32,4 +46,10 @@ async def seed_two_businesses(url: str) -> None:
          "(:a, '2026-01-01T00:00:00Z'), (:b, '2026-01-02T00:00:00Z')", p),
         ("INSERT INTO tags (id, business_id, store_id, variation_id, content_hash) VALUES "
          "(:ta, :a, :sa, 'VAR_A', 'hash-a'), (:tb, :b, :sb, 'VAR_B', 'hash-b')", p),
+        ("INSERT INTO users (id, business_id, cognito_sub, email, role, disabled_at) VALUES "
+         "(:oa, :a, 'sub-owner-a', 'owner@a.test', 'owner', NULL), "
+         "(:sta, :a, 'sub-staff-a', 'staff@a.test', 'staff', NULL), "
+         "(:da, :a, 'sub-disabled-a', 'gone@a.test', 'staff', now()), "
+         "(:ob, :b, 'sub-owner-b', 'owner@b.test', 'owner', NULL)", p),
+        ("INSERT INTO user_stores (user_id, store_id, business_id) VALUES (:sta, :sa2, :a)", p),
     ])
