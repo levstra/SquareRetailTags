@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import event, text
@@ -37,7 +37,3 @@ async def business_session(business_id: uuid.UUID) -> AsyncIterator[AsyncSession
         scope_to_business(session, business_id)
         yield session
 
-
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        yield session

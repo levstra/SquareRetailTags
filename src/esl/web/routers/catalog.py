@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from esl.catalog.models import CatalogVariation
-from esl.db import get_session
+from esl.web.deps import get_business_session
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ class VariationListResponse(BaseModel):
 
 
 @router.get("/catalog/variations", response_model=VariationListResponse)
-async def list_variations(session: AsyncSession = Depends(get_session)):
+async def list_variations(session: AsyncSession = Depends(get_business_session)):
     rows = (
         await session.execute(
             select(CatalogVariation).options(selectinload(CatalogVariation.item))

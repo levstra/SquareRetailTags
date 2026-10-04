@@ -100,6 +100,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: >
+            The tag can't be used by this business (for example, it is
+            registered elsewhere). Deliberately does not say why.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /tags/{tag_id}/confirm:
     parameters:
