@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from esl import db
-from esl.web.routers import catalog, health, tags, webhooks
+from esl.web.routers import account, catalog, health, staff, tags, webhooks
 
 
 @asynccontextmanager
@@ -18,6 +18,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/v1")
     app.include_router(catalog.router, prefix="/v1")
     app.include_router(tags.router, prefix="/v1")
+    app.include_router(account.router, prefix="/v1")
+    app.include_router(staff.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
     return app
 

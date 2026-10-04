@@ -164,6 +164,139 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /me:
+    get:
+      operationId: getMe
+      summary: The signed-in user, their business and the stores they may use
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /stores:
+    get:
+      operationId: listStores
+      summary: Stores the signed-in user may use
+      responses:
+        "200":
+          description: Stores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /staff:
+    get:
+      operationId: listStaff
+      summary: Everyone with access to this business (owners only)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: inviteStaff
+      summary: Invite a staff member by email (owners only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffInvite"
+      responses:
+        "201":
+          description: Invited; Cognito emails them a temporary password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffUser"
+        "400":
+          description: A store id does not belong to this business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: This email can't be invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: The invitation could not be sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /staff/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateStaff
+      summary: Change a staff member's stores or disable/enable them (owners only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffUser"
+        "400":
+          description: A store id does not belong to this business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such user in this business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: The identity provider call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   securitySchemes:
     cognitoBearer:
@@ -329,3 +462,103 @@ components:
       properties:
         detail:
           type: string
+
+    Store:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    StoreList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Store"
+
+    Me:
+      type: object
+      required: [user_id, email, role, business, stores]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, staff]
+        business:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        stores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Store"
+
+    StaffUser:
+      type: object
+      required: [id, email, role, disabled, store_ids]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, staff]
+        disabled:
+          type: boolean
+        store_ids:
+          type: array
+          description: Allowed stores. Empty means every store.
+          items:
+            type: string
+            format: uuid
+
+    StaffList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffUser"
+
+    StaffInvite:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        store_ids:
+          type: array
+          description: Allowed stores. Omit or leave empty for every store.
+          items:
+            type: string
+            format: uuid
+
+    StaffUpdate:
+      type: object
+      properties:
+        store_ids:
+          type: array
+          description: Replaces allowed stores. Empty means every store.
+          items:
+            type: string
+            format: uuid
+        disabled:
+          type: boolean

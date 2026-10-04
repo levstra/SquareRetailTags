@@ -9,7 +9,10 @@ from esl.web.deps import get_business_session, get_current_user
 UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square"}
 
 # Known scoped routes that must exist and be checked.
-REQUIRED_SCOPED_ROUTES = {"/v1/tags", "/v1/tags/{tag_id}", "/v1/tags/{tag_id}/confirm", "/v1/catalog/variations"}
+REQUIRED_SCOPED_ROUTES = {
+    "/v1/tags", "/v1/tags/{tag_id}", "/v1/tags/{tag_id}/confirm", "/v1/catalog/variations",
+    "/v1/me", "/v1/stores", "/v1/staff", "/v1/staff/{user_id}",
+}
 
 
 async def test_every_business_table_has_forced_rls(admin_session):

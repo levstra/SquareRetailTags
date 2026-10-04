@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from esl.accounts.identity import IdentityError, IdentityProvider, make_identity_provider
 from esl.auth.current_user import CurrentUser, load_current_user
 from esl.auth.tokens import InvalidToken, TokenVerifier, cognito_verifier
 from esl.config import settings
@@ -27,6 +28,18 @@ def get_token_verifier() -> TokenVerifier:
     return _cognito_verifier(
         settings.cognito_region, settings.cognito_user_pool_id, settings.cognito_app_client_id
     )
+
+
+@lru_cache(maxsize=1)
+def _identity_provider() -> IdentityProvider:
+    return make_identity_provider()
+
+
+def get_identity_provider() -> IdentityProvider:
+    try:
+        return _identity_provider()
+    except IdentityError:
+        raise HTTPException(status_code=503, detail="Account management is not configured")
 
 
 async def get_current_user(

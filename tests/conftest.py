@@ -79,6 +79,17 @@ async def anon_client():
 
 
 @pytest.fixture
+def fake_idp():
+    from esl.web.app import app
+    from esl.web.deps import get_identity_provider
+    from tests.fakes import FakeIdentityProvider
+
+    idp = FakeIdentityProvider()
+    app.dependency_overrides[get_identity_provider] = lambda: idp
+    return idp  # cleared with the other overrides by the client fixtures
+
+
+@pytest.fixture
 async def two_businesses():
     # Start clean: CASCADE empties every table that references businesses
     # (including the default business created by migration 0002).
