@@ -75,6 +75,19 @@ python scripts/gateway_sim.py --url http://localhost:8001 --interval 5
 It polls `/v1/tags`, "renders" any tag whose hash changed, and posts a
 confirmation back — exactly the loop the real gateway should implement.
 
+### Sign-in (Cognito)
+
+The dashboard requires a Cognito login. One-time dev setup:
+
+1. `powershell -ExecutionPolicy Bypass -File .\scripts\dev_cognito.ps1 -DomainPrefix esl-dev-<yourname>`
+2. Put the printed values in `.env` and `frontend/.env.local`.
+3. Give yourself access to the dev data (the default business):
+   `.venv\Scripts\esl admin invite-user --business 00000000-0000-0000-0000-000000000001 --email <you> --role owner`
+   Cognito emails a temporary password; you set a new one on first sign-in.
+
+New client businesses: `esl admin create-business --name "<name>" --owner-email <owner>`.
+Owners invite staff from the dashboard's Staff tab.
+
 ---
 
 ## API calls for the Pi gateway
