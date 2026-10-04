@@ -3,11 +3,11 @@ from sqlalchemy import text
 
 from esl.accounts.identity import EmailAlreadyRegistered
 from esl.accounts.service import (
-    NotStaff, UnknownStore, create_business, invite_user, set_staff_disabled, set_staff_stores,
+    NotStaff, UnknownStore, UserNotFound, create_business, invite_user, set_staff_disabled, set_staff_stores,
 )
 from esl.db import business_session
 from tests.fakes import FakeIdentityProvider
-from tests.seed import BUSINESS_A, OWNER_A, STAFF_A, STORE_A, STORE_A2, STORE_B
+from tests.seed import BUSINESS_A, BUSINESS_B, OWNER_A, STAFF_A, STORE_A, STORE_A2, STORE_B
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
@@ -71,16 +71,16 @@ async def test_disable_and_enable_staff():
     idp = FakeIdentityProvider()
     idp.users["staff@a.test"] = {"sub": "sub-staff-a", "enabled": True}
     async with business_session(BUSINESS_A) as session:
-        user = await set_staff_disabled(session, idp, user_id=STAFF_A, disabled=True)
+        user = await set_staff_disabled(session, idp, business_id=BUSINESS_A, user_id=STAFF_A, disabled=True)
         assert user.disabled_at is not None and idp.users["staff@a.test"]["enabled"] is False
-        user = await set_staff_disabled(session, idp, user_id=STAFF_A, disabled=False)
+        user = await set_staff_disabled(session, idp, business_id=BUSINESS_A, user_id=STAFF_A, disabled=False)
         assert user.disabled_at is None and idp.users["staff@a.test"]["enabled"] is True
 
 
 async def test_owners_cannot_be_disabled_here():
     async with business_session(BUSINESS_A) as session:
         with pytest.raises(NotStaff):
-            await set_staff_disabled(session, FakeIdentityProvider(), user_id=OWNER_A, disabled=True)
+            await set_staff_disabled(session, FakeIdentityProvider(), business_id=BUSINESS_A, user_id=OWNER_A, disabled=True)
 
 
 async def test_create_business_with_owner_and_store(admin_session):
@@ -93,3 +93,17 @@ async def test_create_business_with_owner_and_store(admin_session):
         "where b.id = :b"
     ), {"b": business_id})).all()
     assert rows == [("Card Shop", "Main store", "boss@cardshop.test", "owner")]
+
+
+async def test_staff_actions_are_scoped_to_business_without_rls(admin_session):
+    idp = FakeIdentityProvider()
+    idp.users["staff@a.test"] = {"sub": "sub-staff-a", "enabled": True}
+    with pytest.raises(UserNotFound):
+        await set_staff_disabled(admin_session, idp, business_id=BUSINESS_B, user_id=STAFF_A, disabled=True)
+    assert idp.users["staff@a.test"]["enabled"] is True
+    with pytest.raises(UserNotFound):
+        await set_staff_stores(admin_session, business_id=BUSINESS_B, user_id=STAFF_A, store_ids=frozenset())
+    rows = (await admin_session.execute(
+        text("select store_id from user_stores where user_id = :u"), {"u": STAFF_A}
+    )).scalars().all()
+    assert rows == [STORE_A2]

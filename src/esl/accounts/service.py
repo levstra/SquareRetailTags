@@ -81,8 +81,10 @@ async def create_business(
     return business_id
 
 
-async def _get_staff(session: AsyncSession, user_id: uuid.UUID) -> User:
-    user = await session.get(User, user_id)
+async def _get_staff(session: AsyncSession, business_id: uuid.UUID, user_id: uuid.UUID) -> User:
+    user = (await session.execute(
+        select(User).where(User.id == user_id, User.business_id == business_id)
+    )).scalar_one_or_none()
     if user is None:
         raise UserNotFound(str(user_id))
     if user.role != "staff":
@@ -98,9 +100,11 @@ async def set_staff_stores(
     store_ids: frozenset[uuid.UUID],
 ) -> User:
     """Replace a staff user's allowed stores. An empty set means every store."""
-    user = await _get_staff(session, user_id)
+    user = await _get_staff(session, business_id, user_id)
     await _check_stores(session, business_id, store_ids)
-    await session.execute(delete(UserStore).where(UserStore.user_id == user_id))
+    await session.execute(delete(UserStore).where(
+        UserStore.user_id == user_id, UserStore.business_id == business_id
+    ))
     for store_id in store_ids:
         session.add(UserStore(user_id=user_id, store_id=store_id, business_id=business_id))
     await session.commit()
@@ -108,9 +112,9 @@ async def set_staff_stores(
 
 
 async def set_staff_disabled(
-    session: AsyncSession, idp: IdentityProvider, *, user_id: uuid.UUID, disabled: bool
+    session: AsyncSession, idp: IdentityProvider, *, business_id: uuid.UUID, user_id: uuid.UUID, disabled: bool
 ) -> User:
-    user = await _get_staff(session, user_id)
+    user = await _get_staff(session, business_id, user_id)
     user.disabled_at = datetime.now(timezone.utc) if disabled else None
     await session.flush()
     try:
@@ -122,10 +126,12 @@ async def set_staff_disabled(
     return user
 
 
-async def user_store_ids(session: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
+async def user_store_ids(
+    session: AsyncSession, *, business_id: uuid.UUID, user_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
     rows = (await session.execute(
         select(UserStore.user_id, UserStore.store_id)
-        .where(UserStore.user_id.in_(user_ids))
+        .where(UserStore.user_id.in_(user_ids), UserStore.business_id == business_id)
         .order_by(UserStore.store_id)
     )).all()
     result: dict[uuid.UUID, list[uuid.UUID]] = {u: [] for u in user_ids}
