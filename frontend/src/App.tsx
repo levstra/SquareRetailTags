@@ -300,17 +300,35 @@ export default function App() {
   >(null);
   const [tab, setTab] = useState<"tags" | "staff">("tags");
 
-  const { data: me } = useQuery({
+  const { data: me, error: meError } = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
       const { data, error } = await api.GET("/me");
       if (error) throw error;
       return data;
     },
+    retry: false,
   });
 
   const tabClass = (t: typeof tab) =>
     `px-3 py-1.5 text-sm rounded ${tab === t ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`;
+
+  if (meError) {
+    const detail =
+      typeof meError === "object" && "detail" in meError && typeof meError.detail === "string"
+        ? meError.detail
+        : null;
+    return (
+      <div className="p-6 space-y-3">
+        <p className="text-sm text-red-600">
+          {detail ?? "Your account doesn't have access to this dashboard."}
+        </p>
+        <button className="text-sm underline text-gray-600" onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white">

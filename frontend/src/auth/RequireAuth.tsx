@@ -1,10 +1,12 @@
 import { useEffect, type ReactNode } from "react";
 import { hasAuthParams, useAuth } from "react-oidc-context";
+import { isSigningOut } from "./userManager";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();
 
   useEffect(() => {
+    if (isSigningOut()) return;
     if (!hasAuthParams() && !auth.isAuthenticated && !auth.activeNavigator && !auth.isLoading && !auth.error) {
       void auth.signinRedirect();
     }
@@ -21,7 +23,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
   if (!auth.isAuthenticated) {
-    return <div className="p-6 text-sm text-gray-500">Signing in…</div>;
+    return (
+      <div className="p-6 text-sm text-gray-500">{isSigningOut() ? "Signing out…" : "Signing in…"}</div>
+    );
   }
   return <>{children}</>;
 }

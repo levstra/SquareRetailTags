@@ -1,6 +1,8 @@
 import createClient, { type Middleware } from "openapi-fetch";
-import { userManager } from "../auth/userManager";
+import { isSigningOut, userManager } from "../auth/userManager";
 import type { paths } from "./schema.d.ts";
+
+let redirecting = false;
 
 const bearer: Middleware = {
   async onRequest({ request }) {
@@ -11,7 +13,8 @@ const bearer: Middleware = {
     return request;
   },
   async onResponse({ response }) {
-    if (response.status === 401) {
+    if (response.status === 401 && !redirecting && !isSigningOut()) {
+      redirecting = true;
       await userManager.signinRedirect();
     }
     return response;

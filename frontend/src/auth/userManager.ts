@@ -18,7 +18,13 @@ export const userManager = new UserManager({
 });
 
 // Cognito's logout endpoint isn't in its OIDC discovery document.
+let signingOut = false;
+export function isSigningOut(): boolean {
+  return signingOut;
+}
+
 export async function signOut(): Promise<void> {
+  signingOut = true;
   await userManager.removeUser();
   const params = new URLSearchParams({ client_id: clientId, logout_uri: `${origin}/` });
   window.location.assign(`${cognitoDomain}/logout?${params}`);

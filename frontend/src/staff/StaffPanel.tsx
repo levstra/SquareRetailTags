@@ -124,6 +124,9 @@ export function StaffPanel() {
       </form>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {(staff.error || stores.error) && (
+        <p className="text-sm text-red-600">{message(staff.error ?? stores.error)}</p>
+      )}
 
       <table className="w-full text-sm">
         <thead className="text-left text-gray-500">
