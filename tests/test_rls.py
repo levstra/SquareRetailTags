@@ -70,7 +70,7 @@ async def test_tag_cannot_reference_other_business_variation(admin_session):
     with pytest.raises(DBAPIError, match="foreign key"):
         await admin_session.execute(text(
             "insert into tags (id, business_id, store_id, variation_id) "
-            "values ('CCCCCCCCCCCCCCC1', :a, :sa, 'VAR_B')"
+            "values ('CCCCCCCCCCC1', :a, :sa, 'VAR_B')"
         ), {"a": BUSINESS_A, "sa": STORE_A})
 
 

@@ -15,7 +15,7 @@ def test_existing_rows_move_to_default_business():
         ("INSERT INTO catalog_items (id, name, updated_at) VALUES ('ITEM1', 'Booster Box', now())", {}),
         ("INSERT INTO catalog_variations (id, item_id, variation_name, price, pricing_type, updated_at) "
          "VALUES ('VAR1', 'ITEM1', 'Regular', 13494, 'FIXED_PRICING', now())", {}),
-        ("INSERT INTO tags (id, variation_id, content_hash) VALUES ('3F2A000000000001', 'VAR1', 'h1')", {}),
+        ("INSERT INTO tags (id, variation_id, content_hash) VALUES ('3F2A00000001', 'VAR1', 'h1')", {}),
         ("INSERT INTO sync_cursors (id, latest_time) VALUES ('catalog', '2026-09-26T05:35:21.03Z')", {}),
     ]))
 

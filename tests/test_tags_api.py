@@ -8,7 +8,7 @@ from tests.seed import BUSINESS_A, BUSINESS_B, STORE_A, TAG_A, TAG_B
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
-NEW_TAG = "1234567890ABCDEF"
+NEW_TAG = "1234567890AB"
 
 
 async def test_list_returns_only_own_tags(client):
