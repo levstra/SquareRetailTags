@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from esl.accounts.identity import EmailAlreadyRegistered, IdentityError, IdentityProvider
 from esl.accounts.models import User
 from esl.accounts.service import (
-    NotStaff, UnknownStore, UserNotFound, invite_user, set_staff_disabled, set_staff_stores,
+    InvalidStoreAccess, NotStaff, UnknownStore, UserNotFound, invite_user, set_staff_disabled, set_staff_stores,
     user_store_ids,
 )
 from esl.auth.current_user import CurrentUser
@@ -23,6 +23,7 @@ class StaffUser(BaseModel):
     email: str
     role: str
     disabled: bool
+    all_stores: bool
     store_ids: list[uuid.UUID]
 
 
@@ -32,6 +33,7 @@ class StaffList(BaseModel):
 
 class StaffInvite(BaseModel):
     email: str
+    all_stores: bool = False
     store_ids: list[uuid.UUID] = []
 
     @field_validator("email")
@@ -43,6 +45,7 @@ class StaffInvite(BaseModel):
 
 
 class StaffUpdate(BaseModel):
+    all_stores: bool | None = None
     store_ids: list[uuid.UUID] | None = None
     disabled: bool | None = None
 
@@ -50,7 +53,8 @@ class StaffUpdate(BaseModel):
 async def _out(session: AsyncSession, business_id: uuid.UUID, user: User) -> StaffUser:
     stores = await user_store_ids(session, business_id=business_id, user_ids=[user.id])
     return StaffUser(id=user.id, email=user.email, role=user.role,
-                     disabled=user.disabled_at is not None, store_ids=stores[user.id])
+                     disabled=user.disabled_at is not None, all_stores=user.all_stores,
+                     store_ids=stores[user.id])
 
 
 @router.get("/staff", response_model=StaffList)
@@ -62,7 +66,7 @@ async def list_staff(
     stores = await user_store_ids(session, business_id=owner.business_id, user_ids=[u.id for u in users])
     return StaffList(users=[
         StaffUser(id=u.id, email=u.email, role=u.role, disabled=u.disabled_at is not None,
-                  store_ids=stores[u.id])
+                  all_stores=u.all_stores, store_ids=stores[u.id])
         for u in users
     ])
 
@@ -76,9 +80,12 @@ async def invite_staff(
 ):
     try:
         user = await invite_user(session, idp, business_id=owner.business_id, email=body.email,
-                                 role="staff", store_ids=frozenset(body.store_ids))
+                                 role="staff", store_ids=frozenset(body.store_ids),
+                                 all_stores=body.all_stores)
     except UnknownStore:
         raise HTTPException(status_code=400, detail="Unknown store")
+    except InvalidStoreAccess:
+        raise HTTPException(status_code=400, detail="Choose all stores or specific stores, not both")
     except (EmailAlreadyRegistered, IntegrityError):
         raise HTTPException(status_code=409, detail="This email can't be invited")
     except IdentityError:
@@ -96,9 +103,11 @@ async def update_staff(
 ):
     try:
         user = await session.get(User, user_id)
-        if body.store_ids is not None:
+        if body.all_stores is not None or body.store_ids is not None:
+            # Either field replaces the whole store access; a missing one counts as false / empty.
             user = await set_staff_stores(session, business_id=owner.business_id, user_id=user_id,
-                                          store_ids=frozenset(body.store_ids))
+                                          all_stores=bool(body.all_stores),
+                                          store_ids=frozenset(body.store_ids or ()))
         if body.disabled is not None:
             user = await set_staff_disabled(session, idp, business_id=owner.business_id,
                                             user_id=user_id, disabled=body.disabled)
@@ -112,6 +121,8 @@ async def update_staff(
         raise HTTPException(status_code=403, detail="Owners can't be changed here")
     except UnknownStore:
         raise HTTPException(status_code=400, detail="Unknown store")
+    except InvalidStoreAccess:
+        raise HTTPException(status_code=400, detail="Choose all stores or specific stores, not both")
     except IdentityError:
         raise HTTPException(status_code=502, detail="Couldn't update the account. Try again.")
     return await _out(session, owner.business_id, user)

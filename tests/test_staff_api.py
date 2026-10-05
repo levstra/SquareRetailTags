@@ -25,6 +25,9 @@ async def test_staff_list_is_owner_only_and_per_business(client):
     assert {u["email"] for u in users} == {"owner@a.test", "staff@a.test", "gone@a.test"}
     staff = next(u for u in users if u["id"] == str(STAFF_A))
     assert staff["store_ids"] == [str(STORE_A2)] and staff["disabled"] is False
+    assert staff["all_stores"] is False
+    owner = next(u for u in users if u["id"] == str(OWNER_A))
+    assert owner["all_stores"] is False
     assert (await client.get("/v1/staff", headers=bearer(STAFF_A_SUB))).status_code == 403
     b_users = (await client.get("/v1/staff", headers=bearer(OWNER_B_SUB))).json()["users"]
     assert [u["email"] for u in b_users] == ["owner@b.test"]
@@ -35,6 +38,7 @@ async def test_invite_staff(client, fake_idp):
     assert response.status_code == 201
     body = response.json()
     assert (body["email"], body["role"], body["store_ids"]) == ("clerk@a.test", "staff", [str(STORE_A)])
+    assert body["all_stores"] is False
     assert "clerk@a.test" in fake_idp.users
 
 
@@ -53,6 +57,8 @@ async def test_update_staff_stores_and_disable(client, fake_idp):
     fake_idp.users["staff@a.test"] = {"sub": STAFF_A_SUB, "enabled": True}
     stores = await client.patch(f"/v1/staff/{STAFF_A}", json={"store_ids": []})
     assert stores.status_code == 200 and stores.json()["store_ids"] == []
+    assert stores.json()["all_stores"] is False
+    assert (await client.get("/v1/stores", headers=bearer(STAFF_A_SUB))).json()["stores"] == []
     disabled = await client.patch(f"/v1/staff/{STAFF_A}", json={"disabled": True})
     assert disabled.json()["disabled"] is True
     # Disabled users lose access on their next request.
@@ -73,3 +79,48 @@ async def test_invite_email_with_existing_row_is_409_and_leaves_no_identity(clie
     response = await client.post("/v1/staff", json={"email": "owner@a.test"})
     assert response.status_code == 409
     assert "owner@a.test" not in fake_idp.users
+
+
+async def test_invite_staff_with_all_stores(client, fake_idp):
+    response = await client.post("/v1/staff", json={"email": "all@a.test", "all_stores": True})
+    assert response.status_code == 201
+    assert (response.json()["all_stores"], response.json()["store_ids"]) == (True, [])
+    sub = fake_idp.users["all@a.test"]["sub"]
+    stores = (await client.get("/v1/stores", headers=bearer(sub))).json()["stores"]
+    assert {s["id"] for s in stores} == {str(STORE_A), str(STORE_A2)}
+
+
+async def test_invite_without_stores_has_no_store_access(client, fake_idp):
+    response = await client.post("/v1/staff", json={"email": "none@a.test"})
+    assert response.status_code == 201
+    assert (response.json()["all_stores"], response.json()["store_ids"]) == (False, [])
+    sub = fake_idp.users["none@a.test"]["sub"]
+    assert (await client.get("/v1/stores", headers=bearer(sub))).json()["stores"] == []
+
+
+async def test_invite_all_stores_with_specific_stores_is_400(client, fake_idp):
+    response = await client.post("/v1/staff", json={
+        "email": "both@a.test", "all_stores": True, "store_ids": [str(STORE_A)]})
+    assert response.status_code == 400
+    assert "both@a.test" not in fake_idp.users
+
+
+async def test_update_staff_all_stores_round_trip(client, fake_idp):
+    url = f"/v1/staff/{STAFF_A}"
+    staff_headers = bearer(STAFF_A_SUB)
+
+    all_on = await client.patch(url, json={"all_stores": True})
+    assert all_on.status_code == 200
+    assert (all_on.json()["all_stores"], all_on.json()["store_ids"]) == (True, [])
+    stores = (await client.get("/v1/stores", headers=staff_headers)).json()["stores"]
+    assert {s["id"] for s in stores} == {str(STORE_A), str(STORE_A2)}
+
+    specific = await client.patch(url, json={"store_ids": [str(STORE_A)]})
+    assert (specific.json()["all_stores"], specific.json()["store_ids"]) == (False, [str(STORE_A)])
+
+    both = await client.patch(url, json={"all_stores": True, "store_ids": [str(STORE_A2)]})
+    assert both.status_code == 400
+
+    none = await client.patch(url, json={"all_stores": False})
+    assert (none.json()["all_stores"], none.json()["store_ids"]) == (False, [])
+    assert (await client.get("/v1/stores", headers=staff_headers)).json()["stores"] == []

@@ -22,6 +22,17 @@ class UserNotFound(LookupError):
     pass
 
 
+class InvalidStoreAccess(ValueError):
+    """all_stores combined with specific stores, or store access given to an owner."""
+
+
+def _check_access_shape(role: str, all_stores: bool, store_ids: frozenset[uuid.UUID]) -> None:
+    if all_stores and store_ids:
+        raise InvalidStoreAccess("Choose all stores or specific stores, not both")
+    if role != "staff" and (all_stores or store_ids):
+        raise InvalidStoreAccess("Owners use every store")
+
+
 def normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -44,13 +55,16 @@ async def invite_user(
     email: str,
     role: str,
     store_ids: frozenset[uuid.UUID] = frozenset(),
+    all_stores: bool = False,
 ) -> User:
     """Create the Cognito identity, then the users row; undo the identity if the row fails."""
     email = normalize_email(email)
+    _check_access_shape(role, all_stores, store_ids)
     await _check_stores(session, business_id, store_ids)
     sub = await asyncio.to_thread(idp.invite, email)
     try:
-        user = User(id=uuid.uuid4(), business_id=business_id, cognito_sub=sub, email=email, role=role)
+        user = User(id=uuid.uuid4(), business_id=business_id, cognito_sub=sub, email=email, role=role,
+                    all_stores=all_stores)
         session.add(user)
         await session.flush()
         for store_id in store_ids:
@@ -98,8 +112,13 @@ async def set_staff_stores(
     business_id: uuid.UUID,
     user_id: uuid.UUID,
     store_ids: frozenset[uuid.UUID],
+    all_stores: bool = False,
 ) -> User:
-    """Replace a staff user's allowed stores. An empty set means every store."""
+    """Replace a staff user's store access: every store (all_stores) or exactly store_ids.
+
+    Empty store_ids without all_stores means no store at all.
+    """
+    _check_access_shape("staff", all_stores, store_ids)
     user = await _get_staff(session, business_id, user_id)
     await _check_stores(session, business_id, store_ids)
     await session.execute(delete(UserStore).where(
@@ -107,6 +126,7 @@ async def set_staff_stores(
     ))
     for store_id in store_ids:
         session.add(UserStore(user_id=user_id, store_id=store_id, business_id=business_id))
+    user.all_stores = all_stores
     await session.commit()
     return user
 

@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 from tests.auth import bearer, make_token
 from tests.seed import (
-    DISABLED_A_SUB, OWNER_B_SUB, STAFF_A_SUB, STORE_A2, TAG_A, TAG_B,
+    BUSINESS_A, DISABLED_A_SUB, OWNER_B_SUB, STAFF_A, STAFF_A_SUB, STORE_A, STORE_A2, TAG_A, TAG_B,
 )
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
@@ -94,3 +94,46 @@ async def test_unreachable_signing_keys_is_503_not_401(anon_client):
         issuer=ISSUER, client_id=CLIENT_ID, key_resolver=unreachable)
     response = await anon_client.get("/v1/tags", headers=bearer(OWNER_B_SUB))
     assert response.status_code == 503
+
+
+STORE_A3 = "00000000-0000-0000-0000-0000000000a3"
+
+
+async def test_staff_with_no_stores_sees_nothing_and_cannot_create(client, admin_session):
+    await admin_session.execute(text("delete from user_stores where user_id = :u"), {"u": STAFF_A})
+    await admin_session.commit()
+    headers = bearer(STAFF_A_SUB)
+    assert (await client.get("/v1/tags", headers=headers)).json()["tags"] == []
+    assert (await client.get("/v1/stores", headers=headers)).json()["stores"] == []
+    assert (await client.get("/v1/me", headers=headers)).json()["stores"] == []
+    created = await client.put("/v1/tags/0B0B0B0B0B0B", json={"variation_id": "VAR_A"}, headers=headers)
+    assert created.status_code == 403
+    count = (await admin_session.execute(
+        text("select count(*) from tags where id = '0B0B0B0B0B0B'"))).scalar_one()
+    assert count == 0
+    assert (await client.get(f"/v1/tags/{TAG_A}", headers=headers)).status_code == 403
+
+
+async def test_deleting_restricted_staffs_only_store_leaves_no_access(client, admin_session):
+    # STAFF_A may use STORE_A2 only. esl_app can't delete stores; the admin login can.
+    # The delete cascades STAFF_A's only user_stores row away.
+    await admin_session.execute(text("delete from stores where id = :s"), {"s": STORE_A2})
+    await admin_session.commit()
+    headers = bearer(STAFF_A_SUB)
+    assert (await client.get("/v1/stores", headers=headers)).json()["stores"] == []
+    assert (await client.get("/v1/tags", headers=headers)).json()["tags"] == []  # not TAG_A
+    created = await client.put("/v1/tags/0C0C0C0C0C0C", json={"variation_id": "VAR_A"}, headers=headers)
+    assert created.status_code == 403
+
+
+async def test_all_stores_staff_uses_every_store_including_new_ones(client, admin_session):
+    await admin_session.execute(text("delete from user_stores where user_id = :u"), {"u": STAFF_A})
+    await admin_session.execute(text("update users set all_stores = true where id = :u"), {"u": STAFF_A})
+    await admin_session.execute(text(
+        "insert into stores (id, business_id, name) values (:s, :b, 'Store A3')"),
+        {"s": STORE_A3, "b": BUSINESS_A})
+    await admin_session.commit()
+    headers = bearer(STAFF_A_SUB)
+    stores = {s["id"] for s in (await client.get("/v1/stores", headers=headers)).json()["stores"]}
+    assert stores == {str(STORE_A), str(STORE_A2), STORE_A3}
+    assert [t["id"] for t in (await client.get("/v1/tags", headers=headers)).json()["tags"]] == [TAG_A]

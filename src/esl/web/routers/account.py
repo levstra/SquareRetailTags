@@ -36,6 +36,8 @@ class Me(BaseModel):
 
 
 async def allowed_stores(session: AsyncSession, user: CurrentUser) -> list[StoreOut]:
+    if not user.has_store_access:
+        return []
     query = select(Store).order_by(Store.created_at, Store.id)
     if user.store_ids is not None:
         query = query.where(Store.id.in_(user.store_ids))

@@ -47,7 +47,7 @@ export interface paths {
         };
         /**
          * List all tags with their desired display state
-         * @description The gateway polls this endpoint to discover which tags need updating. Returns all known tags. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
+         * @description Tags in the stores the signed-in user may use (every store for owners and all-stores staff). A staff member with no store access gets an empty list. The gateway polls this endpoint to discover which tags need updating. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
          */
         get: operations["listTags"];
         put?: never;
@@ -71,7 +71,7 @@ export interface paths {
         get: operations["getTag"];
         /**
          * Create or update a tag's variation assignment
-         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately so the gateway picks up the change on its next poll.
+         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately so the gateway picks up the change on its next poll. A staff member with no store access gets 403.
          */
         put: operations["assignTag"];
         post?: never;
@@ -127,7 +127,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Stores the signed-in user may use */
+        /** Stores the signed-in user may use (empty for staff with no store access) */
         get: operations["listStores"];
         put?: never;
         post?: never;
@@ -319,7 +319,9 @@ export interface components {
             /** @enum {string} */
             role: "owner" | "staff";
             disabled: boolean;
-            /** @description Allowed stores. Empty means every store. */
+            /** @description Staff only. True means every store in the business, including stores added later, and store_ids is then empty. Always false for owners, who use every store regardless. */
+            all_stores: boolean;
+            /** @description The stores a staff member may use when all_stores is false. Empty with all_stores false means no store access. */
             store_ids: string[];
         };
         StaffList: {
@@ -327,11 +329,15 @@ export interface components {
         };
         StaffInvite: {
             email: string;
-            /** @description Allowed stores. Omit or leave empty for every store. */
+            /** @description Every store, including stores added later. Omitted means false. Can't be combined with a non-empty store_ids. */
+            all_stores?: boolean;
+            /** @description The stores the new staff member may use. Omitted or empty with all_stores false means no store access until an owner grants one. */
             store_ids?: string[];
         };
+        /** @description Sending all_stores or store_ids replaces the staff member's store access. A field left out counts as false or empty, so {"all_stores": false} alone leaves them with no store access. all_stores true with a non-empty store_ids is a 400. */
         StaffUpdate: {
-            /** @description Replaces allowed stores. Empty means every store. */
+            all_stores?: boolean;
+            /** @description Replaces allowed stores. Empty with all_stores false means no store access. */
             store_ids?: string[];
             disabled?: boolean;
         };
@@ -637,7 +643,7 @@ export interface operations {
                     "application/json": components["schemas"]["StaffUser"];
                 };
             };
-            /** @description A store id does not belong to this business */
+            /** @description A store id does not belong to this business, or all_stores was combined with store_ids */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -692,7 +698,7 @@ export interface operations {
                     "application/json": components["schemas"]["StaffUser"];
                 };
             };
-            /** @description A store id does not belong to this business */
+            /** @description A store id does not belong to this business, or all_stores was combined with store_ids */
             400: {
                 headers: {
                     [name: string]: unknown;

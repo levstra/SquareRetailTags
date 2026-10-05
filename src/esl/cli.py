@@ -26,6 +26,8 @@ def _parser() -> argparse.ArgumentParser:
     invite.add_argument("--business", required=True, type=uuid.UUID)
     invite.add_argument("--email", required=True)
     invite.add_argument("--role", choices=["owner", "staff"], default="owner")
+    invite.add_argument("--all-stores", action="store_true",
+                        help="staff only: every store, including stores added later")
     return parser
 
 
@@ -44,16 +46,24 @@ async def _run(args: argparse.Namespace) -> int:
                 print(f"Created business {business_id}; invited {args.owner_email.strip().lower()} as owner.")
             elif args.command == "invite-user":
                 user = await invite_user(
-                    session, idp, business_id=args.business, email=args.email, role=args.role
+                    session, idp, business_id=args.business, email=args.email, role=args.role,
+                    all_stores=args.all_stores,
                 )
                 print(f"Invited {user.email} as {user.role} (user {user.id}).")
+                if user.role == "staff" and not user.all_stores:
+                    print("They have no store access yet. Grant stores on the Staff tab, "
+                          "or re-run with --all-stores.")
     finally:
         await engine.dispose()
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    return asyncio.run(_run(_parser().parse_args(argv)))
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.command == "invite-user" and args.all_stores and args.role != "staff":
+        parser.error("--all-stores is only for --role staff (owners use every store)")
+    return asyncio.run(_run(args))
 
 
 if __name__ == "__main__":

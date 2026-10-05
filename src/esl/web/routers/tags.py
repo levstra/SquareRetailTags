@@ -80,11 +80,18 @@ def _ensure_store_allowed(user: CurrentUser, store_id: uuid.UUID) -> None:
         raise HTTPException(status_code=403, detail="You don't have access to this store")
 
 
+def _ensure_has_a_store(user: CurrentUser) -> None:
+    if not user.has_store_access:
+        raise HTTPException(status_code=403, detail="You don't have access to any store")
+
+
 @router.get("/tags", response_model=TagListResponse)
 async def list_tags(
     user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_business_session),
 ):
+    if not user.has_store_access:
+        return TagListResponse(tags=[])
     query = select(Tag)
     if user.store_ids is not None:
         query = query.where(Tag.store_id.in_(user.store_ids))
@@ -125,6 +132,7 @@ async def assign_tag(
     session: AsyncSession = Depends(get_business_session),
 ):
     tag_id = _normalize_tag_id(tag_id)
+    _ensure_has_a_store(user)
 
     variation = None
     if body.variation_id is not None:

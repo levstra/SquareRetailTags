@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    CheckConstraint, ForeignKey, ForeignKeyConstraint, TIMESTAMP, Text, UniqueConstraint, func, text,
+    Boolean, CheckConstraint, ForeignKey, ForeignKeyConstraint, TIMESTAMP, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -16,6 +16,7 @@ class User(Base):
     __table_args__ = (
         UniqueConstraint("business_id", "id", name="users_business_id_id_key"),
         CheckConstraint("role in ('owner', 'staff')", name="users_role_check"),
+        CheckConstraint("role = 'staff' OR NOT all_stores", name="users_all_stores_staff_only"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -28,6 +29,12 @@ class User(Base):
     cognito_sub: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     role: Mapped[str] = mapped_column(Text, nullable=False)
+    # Staff only: every store in the business, including stores added later.
+    # False means exactly this user's user_stores rows, which may be none.
+    # Owners always use every store and keep this false.
+    all_stores: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
@@ -35,7 +42,7 @@ class User(Base):
 
 
 class UserStore(Base):
-    """A staff user's allowed store. No rows for a user = every store."""
+    """A staff user's allowed store (ignored when users.all_stores is true). No rows and all_stores false = no store."""
 
     __tablename__ = "user_stores"
     __table_args__ = (

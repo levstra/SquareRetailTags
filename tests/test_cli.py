@@ -36,3 +36,39 @@ def test_invite_user_into_existing_business(fake_idp):
     [rows] = asyncio.run(run_sql(ADMIN_URL, [(
         "select role from users where email = 'second@inviteshop.test'", {})]))
     assert rows == [("owner",)]
+
+
+def _new_business(name: str):
+    [[(business_id,)]] = asyncio.run(run_sql(ADMIN_URL, [(
+        "insert into businesses (id, name) values (gen_random_uuid(), :n) returning id", {"n": name})]))
+    return business_id
+
+
+def test_invite_staff_with_all_stores(fake_idp):
+    business_id = _new_business("All Stores Shop")
+    code = cli.main(["admin", "invite-user", "--business", str(business_id),
+                     "--email", "clerk@allstores.test", "--role", "staff", "--all-stores"])
+    assert code == 0
+    [rows] = asyncio.run(run_sql(ADMIN_URL, [(
+        "select role, all_stores from users where email = 'clerk@allstores.test'", {})]))
+    assert rows == [("staff", True)]
+
+
+def test_invite_staff_without_all_stores_says_no_store_access(fake_idp, capsys):
+    business_id = _new_business("No Stores Shop")
+    code = cli.main(["admin", "invite-user", "--business", str(business_id),
+                     "--email", "clerk@nostores.test", "--role", "staff"])
+    assert code == 0
+    [rows] = asyncio.run(run_sql(ADMIN_URL, [(
+        "select all_stores from users where email = 'clerk@nostores.test'", {})]))
+    assert rows == [(False,)]
+    assert "no store access" in capsys.readouterr().out
+
+
+def test_all_stores_is_for_staff_only(fake_idp):
+    business_id = _new_business("Owner Flag Shop")
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["admin", "invite-user", "--business", str(business_id),
+                  "--email", "boss@ownerflag.test", "--role", "owner", "--all-stores"])
+    assert exit_info.value.code == 2
+    assert "boss@ownerflag.test" not in fake_idp.users

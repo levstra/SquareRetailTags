@@ -3,9 +3,11 @@ from sqlalchemy import text
 
 from esl.accounts.identity import EmailAlreadyRegistered
 from esl.accounts.service import (
-    NotStaff, UnknownStore, UserNotFound, create_business, invite_user, set_staff_disabled, set_staff_stores,
+    InvalidStoreAccess, NotStaff, UnknownStore, UserNotFound, create_business, invite_user, set_staff_disabled,
+    set_staff_stores,
 )
-from esl.db import business_session
+from esl.auth.current_user import load_current_user
+from esl.db import AsyncSessionLocal, business_session
 from tests.fakes import FakeIdentityProvider
 from tests.seed import BUSINESS_A, BUSINESS_B, OWNER_A, STAFF_A, STORE_A, STORE_A2, STORE_B
 
@@ -107,3 +109,77 @@ async def test_staff_actions_are_scoped_to_business_without_rls(admin_session):
         text("select store_id from user_stores where user_id = :u"), {"u": STAFF_A}
     )).scalars().all()
     assert rows == [STORE_A2]
+
+
+async def _store_rows(user_id):
+    async with business_session(BUSINESS_A) as session:
+        return sorted((await session.execute(
+            text("select store_id from user_stores where user_id = :u"), {"u": user_id}
+        )).scalars().all())
+
+
+async def test_invite_staff_with_all_stores():
+    idp = FakeIdentityProvider()
+    async with business_session(BUSINESS_A) as session:
+        user = await invite_user(session, idp, business_id=BUSINESS_A, email="all@shop.test",
+                                 role="staff", all_stores=True)
+    assert user.all_stores is True
+    assert await _store_rows(user.id) == []
+
+
+async def test_invite_staff_without_stores_or_flag_has_no_store():
+    idp = FakeIdentityProvider()
+    async with business_session(BUSINESS_A) as session:
+        user = await invite_user(session, idp, business_id=BUSINESS_A, email="none@shop.test", role="staff")
+    assert user.all_stores is False
+    async with AsyncSessionLocal() as session:
+        current = await load_current_user(session, user.cognito_sub)
+    assert current.store_ids == frozenset()
+
+
+async def test_all_stores_with_specific_stores_is_rejected_before_inviting():
+    idp = FakeIdentityProvider()
+    async with business_session(BUSINESS_A) as session:
+        with pytest.raises(InvalidStoreAccess):
+            await invite_user(session, idp, business_id=BUSINESS_A, email="both@shop.test",
+                              role="staff", all_stores=True, store_ids=frozenset({STORE_A}))
+    assert idp.users == {}
+
+
+async def test_owner_invite_takes_no_store_access():
+    idp = FakeIdentityProvider()
+    async with business_session(BUSINESS_A) as session:
+        with pytest.raises(InvalidStoreAccess):
+            await invite_user(session, idp, business_id=BUSINESS_A, email="boss2@shop.test",
+                              role="owner", all_stores=True)
+    assert idp.users == {}
+
+
+async def test_set_staff_all_stores_clears_rows_and_back():
+    async with business_session(BUSINESS_A) as session:
+        user = await set_staff_stores(session, business_id=BUSINESS_A, user_id=STAFF_A,
+                                      all_stores=True, store_ids=frozenset())
+        assert user.all_stores is True
+    assert await _store_rows(STAFF_A) == []
+    async with business_session(BUSINESS_A) as session:
+        user = await set_staff_stores(session, business_id=BUSINESS_A, user_id=STAFF_A,
+                                      store_ids=frozenset({STORE_A}))
+        assert user.all_stores is False
+    assert await _store_rows(STAFF_A) == [STORE_A]
+
+
+async def test_set_staff_stores_empty_means_no_store():
+    async with business_session(BUSINESS_A) as session:
+        user = await set_staff_stores(session, business_id=BUSINESS_A, user_id=STAFF_A, store_ids=frozenset())
+    assert user.all_stores is False
+    async with AsyncSessionLocal() as session:
+        current = await load_current_user(session, "sub-staff-a")
+    assert current.store_ids == frozenset() and not current.has_store_access
+
+
+async def test_set_staff_all_stores_with_stores_is_rejected():
+    async with business_session(BUSINESS_A) as session:
+        with pytest.raises(InvalidStoreAccess):
+            await set_staff_stores(session, business_id=BUSINESS_A, user_id=STAFF_A,
+                                   all_stores=True, store_ids=frozenset({STORE_A}))
+    assert await _store_rows(STAFF_A) == [STORE_A2]

@@ -7,7 +7,11 @@ type StaffUser = components["schemas"]["StaffUser"];
 type Store = components["schemas"]["Store"];
 type StaffUpdate = components["schemas"]["StaffUpdate"];
 
+type Access = Pick<StaffUser, "all_stores" | "store_ids">;
+
 const UPDATE_STAFF = ["updateStaff"];
+// The API's invite default is no store access; the form starts on "All stores".
+const NEW_STAFF_ACCESS: Access = { all_stores: true, store_ids: [] };
 
 function message(error: unknown): string {
   if (error && typeof error === "object" && "detail" in error && typeof error.detail === "string") {
@@ -18,28 +22,27 @@ function message(error: unknown): string {
 
 function StoreChecklist({
   stores,
-  selected,
+  access,
   onChange,
   disabled = false,
 }: {
   stores: Store[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
+  access: Access;
+  onChange: (access: Access) => void;
   disabled?: boolean;
 }) {
-  // No selected stores means every store, so "All stores" is its own explicit
-  // choice and the last specific store can't be unchecked into it by accident.
-  const all = selected.length === 0;
+  // "All stores" is the all_stores flag. Specific stores are an explicit list,
+  // and an empty list means no store, never every store.
+  const specific = access.all_stores ? [] : access.store_ids;
+  const none = !access.all_stores && access.store_ids.length === 0;
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="flex flex-wrap items-center gap-3">
       <label className="flex items-center gap-1 text-sm">
         <input
           type="checkbox"
-          checked={all}
+          checked={access.all_stores}
           disabled={disabled}
-          onChange={(e) => {
-            if (e.target.checked) onChange([]);
-          }}
+          onChange={(e) => onChange({ all_stores: e.target.checked, store_ids: [] })}
         />
         All stores
       </label>
@@ -47,16 +50,19 @@ function StoreChecklist({
         <label key={s.id} className="flex items-center gap-1 text-sm">
           <input
             type="checkbox"
-            checked={selected.includes(s.id)}
+            checked={specific.includes(s.id)}
             disabled={disabled}
-            onChange={(e) => {
-              if (e.target.checked) onChange([...selected, s.id]);
-              else if (selected.length > 1) onChange(selected.filter((id) => id !== s.id));
-            }}
+            onChange={(e) =>
+              onChange({
+                all_stores: false,
+                store_ids: e.target.checked ? [...specific, s.id] : specific.filter((id) => id !== s.id),
+              })
+            }
           />
           {s.name}
         </label>
       ))}
+      {none && <span className="text-sm text-amber-700">No store access</span>}
     </div>
   );
 }
@@ -64,7 +70,7 @@ function StoreChecklist({
 export function StaffPanel() {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
-  const [inviteStores, setInviteStores] = useState<string[]>([]);
+  const [inviteAccess, setInviteAccess] = useState<Access>(NEW_STAFF_ACCESS);
   const [error, setError] = useState("");
 
   const staff = useQuery({
@@ -88,12 +94,12 @@ export function StaffPanel() {
 
   const invite = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST("/staff", { body: { email, store_ids: inviteStores } });
+      const { error } = await api.POST("/staff", { body: { email, ...inviteAccess } });
       if (error) throw error;
     },
     onSuccess: () => {
       setEmail("");
-      setInviteStores([]);
+      setInviteAccess(NEW_STAFF_ACCESS);
       setError("");
       void refresh();
     },
@@ -109,7 +115,7 @@ export function StaffPanel() {
     onSuccess: () => setError(""),
     onError: (e) => setError(message(e)),
     // Returning the refetch keeps the mutation pending until the row shows
-    // fresh store_ids, so the next click can't build on stale ones.
+    // fresh access, so the next click can't build on stale ones.
     onSettled: () => refresh(),
   });
 
@@ -141,7 +147,7 @@ export function StaffPanel() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <StoreChecklist stores={allStores} selected={inviteStores} onChange={setInviteStores} />
+        <StoreChecklist stores={allStores} access={inviteAccess} onChange={setInviteAccess} />
         <button
           type="submit"
           disabled={invite.isPending}
@@ -176,9 +182,9 @@ export function StaffPanel() {
                 ) : (
                   <StoreChecklist
                     stores={allStores}
-                    selected={u.store_ids}
+                    access={{ all_stores: u.all_stores, store_ids: u.store_ids }}
                     disabled={pendingIds.has(u.id)}
-                    onChange={(ids) => update.mutate({ id: u.id, body: { store_ids: ids } })}
+                    onChange={(access) => update.mutate({ id: u.id, body: access })}
                   />
                 )}
               </td>
