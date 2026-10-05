@@ -119,7 +119,12 @@ def upgrade() -> None:
         op.execute(f"GRANT EXECUTE ON FUNCTION {signature} TO esl_app")
 
     # Existing mirrors predate presence/override columns: force one full sync each.
+    # sync_cursors FORCEs RLS, so under a table owner that is neither superuser
+    # nor BYPASSRLS (the production migration login) the DELETE would silently
+    # match nothing. Lift FORCE for this statement only, in this transaction.
+    op.execute("ALTER TABLE sync_cursors NO FORCE ROW LEVEL SECURITY")
     op.execute("DELETE FROM sync_cursors")
+    op.execute("ALTER TABLE sync_cursors FORCE ROW LEVEL SECURITY")
 
 
 def downgrade() -> None:

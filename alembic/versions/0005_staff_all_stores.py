@@ -64,12 +64,20 @@ def _replace_auth_function(sql: str) -> None:
     op.execute("GRANT EXECUTE ON FUNCTION esl_auth_user(text) TO esl_app")
 
 
+# The statement touches users and reads user_stores in its subquery.
+RLS_TABLES = ("users", "user_stores")
+
+
 def _without_rls(sql: str) -> None:
-    # The migration login bypasses RLS (superuser locally). If a future login
-    # doesn't, error out instead of letting the UPDATE silently match nothing.
-    op.execute("SET LOCAL row_security = off")
+    # The production migration login owns these tables but is neither superuser
+    # nor BYPASSRLS, and FORCE makes even the owner match no rows (no business is
+    # set). Lifting FORCE lets the owner see every row; a superuser is unaffected.
+    # Same transaction, so FORCE is never off outside this statement.
+    for table in RLS_TABLES:
+        op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
     op.execute(sql)
-    op.execute("SET LOCAL row_security = on")
+    for table in RLS_TABLES:
+        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
 
 def upgrade() -> None:
