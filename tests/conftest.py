@@ -8,7 +8,7 @@ import asyncio
 import os
 
 from tests.dbutil import PG, admin_url, migrate, recreate_database, run_sql
-from tests.seed import seed_two_businesses
+from tests.seed import TEST_TOKEN_KEY, seed_two_businesses
 
 ADMIN_URL = admin_url("esl_test")
 APP_URL = f"postgresql+asyncpg://esl_app_test:esl_app_test@{PG}/esl_test"
@@ -18,6 +18,12 @@ os.environ["ADMIN_DATABASE_URL"] = ADMIN_URL
 os.environ["DATABASE_URL"] = APP_URL
 os.environ["SQUARE_TOKEN"] = "test-token"
 os.environ["SQUARE_WEBHOOK_SIGNATURE_KEY"] = ""
+os.environ["SQUARE_WEBHOOK_URL"] = ""
+os.environ["SQUARE_APPLICATION_ID"] = ""
+os.environ["SQUARE_APPLICATION_SECRET"] = ""
+os.environ["TOKEN_ENCRYPTION_KEY"] = TEST_TOKEN_KEY
+os.environ["PUBLIC_BASE_URL"] = "http://localhost:5173"
+os.environ["JOBS_ENABLED"] = "false"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402

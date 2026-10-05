@@ -9,6 +9,7 @@ from esl.db import Base
 import esl.catalog.models  # noqa: F401  (register tables so autogenerate/check see them)
 import esl.tags.models  # noqa: F401
 import esl.accounts.models  # noqa: F401
+import esl.square.models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

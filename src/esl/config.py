@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     square_api_version: str = "2026-05-20"
     square_webhook_signature_key: str = ""
     square_webhook_url: str = ""
+    # Square OAuth app credentials (rollout step 3). Sandbox values in dev.
+    square_application_id: str = ""
+    square_application_secret: str = ""
+    # Fernet key (urlsafe base64, 32 bytes) encrypting stored Square tokens.
+    token_encryption_key: str = ""
+    # Where the dashboard is served; the OAuth redirect URL is built from it.
+    public_base_url: str = "http://localhost:5173"
+    # In-process scheduled jobs (reconciliation sync, token refresh).
+    jobs_enabled: bool = True
     # Cognito user pool for dashboard sign-in (rollout step 2). Empty = sign-in
     # not configured; authenticated endpoints answer 503.
     cognito_region: str = ""

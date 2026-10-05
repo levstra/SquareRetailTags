@@ -19,7 +19,7 @@ def test_existing_rows_move_to_default_business():
         ("INSERT INTO sync_cursors (id, latest_time) VALUES ('catalog', '2026-09-26T05:35:21.03Z')", {}),
     ]))
 
-    migrate(url, "head")
+    migrate(url, "0002")
 
     businesses, stores, items, variations, tags, cursors = asyncio.run(run_sql(url, [
         ("SELECT id, name FROM businesses", {}),

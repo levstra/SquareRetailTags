@@ -60,7 +60,7 @@ async def test_unscoped_insert_fails(app_conn):
         ), {"a": BUSINESS_A})
 
 
-async def test_app_cannot_modify_businesses_or_stores(app_conn):
+async def test_app_cannot_rename_business(app_conn):
     await _scope(app_conn, BUSINESS_A)
     with pytest.raises(DBAPIError, match="permission denied"):
         await app_conn.execute(text("update businesses set name = 'x'"))

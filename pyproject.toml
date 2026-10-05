@@ -17,6 +17,7 @@ dependencies = [
     "squareup>=44,<45",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.10",
+    "cryptography>=46",
     "boto3>=1.35",
 ]
 
