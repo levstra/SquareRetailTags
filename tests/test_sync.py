@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 import pytest
 from sqlalchemy import text
 from square.core.api_error import ApiError
@@ -10,6 +13,7 @@ from tests.seed import (
     BUSINESS_B,
     GOLDEN_HASH_VAR_A,
     GOLDEN_HASH_VAR_A_LOC_A2_OVERRIDE,
+    STORE_A,
     STORE_A2,
     TAG_A,
     TAG_B,
@@ -116,6 +120,23 @@ async def test_recorded_response_stores_overrides_and_presence(fake_square, admi
     assert (await _hashes(admin_session))[TAG_A] == GOLDEN_HASH_VAR_A
 
 
+async def test_tag_in_unlinked_store_keeps_golden_hash(fake_square, admin_session):
+    # Every step-2 tag sits in a store with no Square location until the owner
+    # selects stores. A full sync must not rewrite it: it shows the base price.
+    await admin_session.execute(text(
+        "update stores set square_location_id = null where id = :s"), {"s": STORE_A})
+    await admin_session.execute(text("update tags set content_hash = :h where id = :t"),
+                                {"h": GOLDEN_HASH_VAR_A, "t": TAG_A})
+    await admin_session.commit()
+    fake_square.catalog.objects = load_fixture("search_catalog.json")["objects"]
+
+    result = await _sync_a()
+
+    assert result["variations_upserted"] > 0
+    assert result["tags_rehashed"] == 0
+    assert (await _hashes(admin_session))[TAG_A] == GOLDEN_HASH_VAR_A
+
+
 async def test_resync_replaces_overrides(fake_square, admin_session):
     fake_square.catalog.objects = [square_item("ITEM_A", "Item A", [square_variation(
         "VAR_A", "Regular", 1000, sku="SKU-A",
@@ -160,6 +181,65 @@ async def test_unchanged_resync_rewrites_no_tag(fake_square, admin_session):
     hashes = await _hashes(admin_session)
     assert hashes[TAG_A] == GOLDEN_HASH_VAR_A
     assert hashes[TAG_A2] == GOLDEN_HASH_VAR_A_LOC_A2_OVERRIDE
+
+
+def _hold_first_search(fake_square, first_latest: str, then_latest: str):
+    """Block the first catalog search until released; later searches return then_latest."""
+    entered, release = threading.Event(), threading.Event()
+    search = fake_square.catalog.search
+
+    def held_search(**kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(10)
+            fake_square.catalog.latest_time = first_latest
+            response = search(**kwargs)
+            fake_square.catalog.latest_time = then_latest
+            return response
+        return search(**kwargs)
+
+    fake_square.catalog.search = held_search
+    return entered, release
+
+
+async def _sync(business_id):
+    async with business_session(business_id) as session:
+        return await sync_catalog(session, business_id)
+
+
+async def test_concurrent_syncs_of_one_business_serialize(fake_square, admin_session):
+    # Webhook, post-connect and reconcile syncs can overlap. The second must
+    # wait for the first and start from its cursor, or an older fetch could
+    # commit last and move the cursor backwards.
+    entered, release = _hold_first_search(fake_square, "2026-10-04T12:00:00.000Z", "2026-10-04T13:00:00.000Z")
+    first = asyncio.create_task(_sync(BUSINESS_A))
+    assert await asyncio.to_thread(entered.wait, 10)
+    second = asyncio.create_task(_sync(BUSINESS_A))
+    await asyncio.sleep(0.5)
+    calls_while_held = len(fake_square.catalog.calls)
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert calls_while_held == 0  # the held first search records its call only once released
+    assert [c.get("begin_time") for c in fake_square.catalog.calls] == [
+        "2026-01-01T00:00:00Z", "2026-10-04T12:00:00.000Z"]
+    assert await _cursor(admin_session, BUSINESS_A) == "2026-10-04T13:00:00.000Z"
+
+
+async def test_syncs_of_different_businesses_do_not_block(fake_square, admin_session):
+    entered, release = _hold_first_search(fake_square, LATEST, "2026-10-04T13:00:00.000Z")
+    held = asyncio.create_task(_sync(BUSINESS_A))
+    try:
+        assert await asyncio.to_thread(entered.wait, 10)
+        # fake_square bypasses B's needs_reconnect status, so B syncs.
+        result = await asyncio.wait_for(_sync(BUSINESS_B), timeout=5)
+        a_still_held = not held.done()
+    finally:
+        release.set()
+        await held
+    assert a_still_held
+    assert result["latest_time"] == LATEST
+    assert await _cursor(admin_session, BUSINESS_B) == LATEST
 
 
 async def test_sync_business_returns_result(fake_square, admin_session):

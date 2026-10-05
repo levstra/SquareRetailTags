@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,11 +70,23 @@ def _fetch_changes(client, begin_time: str | None) -> tuple[list, str | None]:
 
 
 async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
-    """Delta-sync one business's catalog. `session` must be scoped to it."""
+    """Delta-sync one business's catalog. `session` must be scoped to it.
+
+    Webhook, post-connect and reconcile syncs of one business can overlap.
+    A transaction-scoped advisory lock serializes them, so an older fetch can
+    never commit after a newer one. Other businesses don't wait. Released at
+    commit or rollback.
+    """
+    await session.execute(
+        text("select pg_advisory_xact_lock(hashtext('esl-sync:' || :business_id))"),
+        {"business_id": str(business_id)},
+    )
+
     # Module attribute on purpose, so tests can swap it.
     client = await connections.client_for_business(session, business_id)
 
-    row = await session.get(SyncCursor, business_id)
+    # Read only after the lock: the previous holder may just have advanced it.
+    row = await session.get(SyncCursor, business_id, populate_existing=True)
     begin_time: str | None = row.latest_time if row else None
 
     items_upserted = 0
