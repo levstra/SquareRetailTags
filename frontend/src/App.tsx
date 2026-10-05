@@ -403,16 +403,18 @@ export default function App() {
       )}
 
       <main className="p-6">
-        {tab === "tags" ? (
+        {tab === "square" && !me ? (
+          <div className="p-8 text-center text-gray-500">Loading…</div>
+        ) : tab === "staff" && me?.role === "owner" ? (
+          <StaffPanel />
+        ) : tab === "square" && me?.role === "owner" ? (
+          <SquareSettings result={squareResult} />
+        ) : (
           <TagGrid
             onAssign={(tag) =>
               setModal({ tagId: tag.id, variationId: tag.variation_id })
             }
           />
-        ) : tab === "staff" ? (
-          <StaffPanel />
-        ) : (
-          <SquareSettings result={squareResult} />
         )}
       </main>
 

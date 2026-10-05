@@ -94,7 +94,7 @@ export function SquareSettings({ result }: { result: string | null }) {
   });
 
   const banner = result ? RESULT_MESSAGES[result] : undefined;
-  const status = connection.data?.status ?? "not_connected";
+  const status = connection.data?.status;
   const locationsError = locations.error ? describeError(locations.error) : "";
 
   return (
@@ -108,10 +108,15 @@ export function SquareSettings({ result }: { result: string | null }) {
       <div className="rounded border border-gray-200 p-4 space-y-2">
         <h2 className="font-medium">Square account</h2>
         <p className="text-sm text-gray-600">
-          {STATUS_TEXT[status]}
+          {connection.isPending
+            ? "Loading…"
+            : status
+              ? STATUS_TEXT[status]
+              : ""}
           {connection.data?.merchant_id ? ` · ${connection.data.merchant_id}` : ""}
         </p>
-        {!active && (
+        {connection.isError && <p className="text-sm text-red-600">{describeError(connection.error)}</p>}
+        {status != null && !active && (
           <button
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
             disabled={connect.isPending}
