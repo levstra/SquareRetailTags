@@ -21,6 +21,7 @@ function Invoke-Aws {
 
 $poolId = Invoke-Aws cognito-idp create-user-pool --region $Region --pool-name 'esl-dev' `
     --username-attributes email --auto-verified-attributes email `
+    --username-configuration CaseSensitive=false `
     --admin-create-user-config 'AllowAdminCreateUserOnly=true' `
     --query 'UserPool.Id' --output text
 
