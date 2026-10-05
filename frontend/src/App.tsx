@@ -8,7 +8,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useState } from "react";
-import { api, clearRedirectMarker } from "./api/client";
+import { api, ApiError, clearRedirectMarker } from "./api/client";
 import type { components } from "./api/schema.d.ts";
 import { signOut } from "./auth/userManager";
 import { StaffPanel } from "./staff/StaffPanel";
@@ -303,8 +303,8 @@ export default function App() {
   const { data: me, error: meError } = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/me");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/me");
+      if (!response.ok) throw new ApiError(response, error);
       clearRedirectMarker();
       return data;
     },
@@ -315,11 +315,8 @@ export default function App() {
     `px-3 py-1.5 text-sm rounded ${tab === t ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`;
 
   if (meError) {
-    const detail =
-      typeof meError === "object" && "detail" in meError && typeof meError.detail === "string"
-        ? meError.detail
-        : null;
-    const meUnauthorized = detail === "Invalid or expired token" || detail === "Sign in required";
+    const detail = meError instanceof ApiError ? meError.detail : null;
+    const meUnauthorized = meError instanceof ApiError && meError.status === 401;
     return (
       <div className="p-6 space-y-3">
         <p className="text-sm text-red-600">

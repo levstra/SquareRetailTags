@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
 import type { components } from "../api/schema.d.ts";
@@ -6,6 +6,8 @@ import type { components } from "../api/schema.d.ts";
 type StaffUser = components["schemas"]["StaffUser"];
 type Store = components["schemas"]["Store"];
 type StaffUpdate = components["schemas"]["StaffUpdate"];
+
+const UPDATE_STAFF = ["updateStaff"];
 
 function message(error: unknown): string {
   if (error && typeof error === "object" && "detail" in error && typeof error.detail === "string") {
@@ -99,19 +101,27 @@ export function StaffPanel() {
   });
 
   const update = useMutation({
+    mutationKey: UPDATE_STAFF,
     mutationFn: async ({ id, body }: { id: string; body: StaffUpdate }) => {
       const { error } = await api.PATCH("/staff/{user_id}", { params: { path: { user_id: id } }, body });
       if (error) throw error;
     },
-    onSuccess: () => {
-      setError("");
-      void refresh();
-    },
+    onSuccess: () => setError(""),
     onError: (e) => setError(message(e)),
+    // Returning the refetch keeps the mutation pending until the row shows
+    // fresh store_ids, so the next click can't build on stale ones.
+    onSettled: () => refresh(),
   });
 
+  // Every row with an update in flight, not just the latest one.
+  const pendingIds = new Set(
+    useMutationState({
+      filters: { mutationKey: UPDATE_STAFF, status: "pending" },
+      select: (m) => (m.state.variables as { id: string } | undefined)?.id,
+    }),
+  );
+
   const allStores = stores.data ?? [];
-  const pendingId = update.isPending ? update.variables?.id : undefined;
 
   return (
     <section className="space-y-6">
@@ -167,7 +177,7 @@ export function StaffPanel() {
                   <StoreChecklist
                     stores={allStores}
                     selected={u.store_ids}
-                    disabled={pendingId === u.id}
+                    disabled={pendingIds.has(u.id)}
                     onChange={(ids) => update.mutate({ id: u.id, body: { store_ids: ids } })}
                   />
                 )}
@@ -176,7 +186,7 @@ export function StaffPanel() {
                 {u.role === "staff" && (
                   <button
                     className="text-sm underline disabled:opacity-50"
-                    disabled={pendingId === u.id}
+                    disabled={pendingIds.has(u.id)}
                     onClick={() => update.mutate({ id: u.id, body: { disabled: !u.disabled } })}
                   >
                     {u.disabled ? "Enable" : "Disable"}

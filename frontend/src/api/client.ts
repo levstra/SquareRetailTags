@@ -52,5 +52,22 @@ const bearer: Middleware = {
   },
 };
 
+// A failed API call, keeping the HTTP status so callers can branch on it
+// instead of on the server's wording.
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string | null;
+
+  constructor(response: Response, body: unknown) {
+    const detail =
+      body && typeof body === "object" && "detail" in body && typeof body.detail === "string"
+        ? body.detail
+        : null;
+    super(detail ?? `Request failed (${response.status})`);
+    this.status = response.status;
+    this.detail = detail;
+  }
+}
+
 export const api = createClient<paths>({ baseUrl: "/v1" });
 api.use(bearer);
