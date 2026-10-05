@@ -29,6 +29,16 @@ def _counter_job(name: str):
     return Job(name, 3600, run), calls
 
 
+async def wait_until(pred, timeout: float = 5.0) -> None:
+    """Poll pred every 10 ms; fail the test if it isn't true within timeout seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not pred():
+        if loop.time() > deadline:
+            pytest.fail(f"condition not met within {timeout} s")
+        await asyncio.sleep(0.01)
+
+
 async def _connection_a(admin_session):
     return (await admin_session.execute(text(
         "select access_token_enc, refresh_token_enc, expires_at, status from square_connections where business_id = :a"
@@ -55,9 +65,9 @@ async def test_run_once_skips_when_another_instance_holds_the_lock():
 async def test_start_runs_immediately_and_stop_cancels():
     job, calls = _counter_job("test-loop")
     tasks = scheduler.start([job])
-    await asyncio.sleep(0.2)
+    await wait_until(lambda: calls)
     await scheduler.stop(tasks)
-    assert calls == [1]
+    assert calls == [1]  # one-hour interval: the immediate run only
     assert all(t.done() for t in tasks)
 
 
@@ -69,9 +79,8 @@ async def test_a_failing_job_keeps_its_loop_alive():
         raise RuntimeError("nope")
 
     tasks = scheduler.start([Job("test-boom", 0.05, boom)])
-    await asyncio.sleep(0.3)
+    await wait_until(lambda: len(calls) >= 2)  # it ran, failed, and ran again
     assert not tasks[0].done()
-    assert len(calls) >= 2  # it ran, failed, and ran again
     await scheduler.stop(tasks)
 
 
@@ -147,9 +156,11 @@ async def test_lifespan_starts_registered_jobs_only_when_enabled(monkeypatch):
     monkeypatch.setattr(registry, "JOBS", [job])
     app = create_app()
     async with app.router.lifespan_context(app):  # disabled in tests
+        # Negative check: with jobs disabled no task is ever created, so this
+        # holds however fast the machine is; the window only gives a bug a chance.
         await asyncio.sleep(0.1)
     assert calls == []
     monkeypatch.setattr(settings, "jobs_enabled", True)
     async with app.router.lifespan_context(app):
-        await asyncio.sleep(0.2)
+        await wait_until(lambda: calls)
     assert calls == [1]
