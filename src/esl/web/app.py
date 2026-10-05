@@ -3,14 +3,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from esl import db
+from esl.config import settings
+from esl.jobs import registry, scheduler
 from esl.web.routers import account, catalog, health, square, staff, tags, webhooks
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await db.assert_rls_enforced(db.engine)
-    yield
-    await db.engine.dispose()
+    # registry.JOBS is read here (not at import) so tests and later steps can change it.
+    tasks = scheduler.start(registry.JOBS) if settings.jobs_enabled else []
+    try:
+        yield
+    finally:
+        await scheduler.stop(tasks)
+        await db.engine.dispose()
 
 
 def create_app() -> FastAPI:

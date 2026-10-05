@@ -14,7 +14,16 @@ SCOPES = ("ITEMS_READ", "MERCHANT_PROFILE_READ")
 
 
 class OAuthFailed(Exception):
-    """Square refused the code or refresh token, or answered without a token."""
+    """Square refused the code or refresh token, or answered without a token.
+
+    `refused` is True only when Square itself rejected the request (a 4xx
+    other than 408/429), i.e. the code or refresh token is dead. Transport
+    errors, timeouts, rate limits, 5xx and malformed responses are transient.
+    """
+
+    def __init__(self, message: str, *, refused: bool = False):
+        super().__init__(message)
+        self.refused = refused
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,10 @@ def refresh(refresh_token: str) -> TokenGrant:
     return _obtain(grant_type="refresh_token", refresh_token=refresh_token)
 
 
+def _is_refusal(status_code: int | None) -> bool:
+    return status_code is not None and 400 <= status_code < 500 and status_code not in (408, 429)
+
+
 def _obtain(**kwargs) -> TokenGrant:
     try:
         response = oauth_client().o_auth.obtain_token(
@@ -69,7 +82,7 @@ def _obtain(**kwargs) -> TokenGrant:
             **kwargs,
         )
     except ApiError as exc:
-        raise OAuthFailed(f"Square OAuth error {exc.status_code}") from exc
+        raise OAuthFailed(f"Square OAuth error {exc.status_code}", refused=_is_refusal(exc.status_code)) from exc
     except httpx.HTTPError as exc:
         # The SDK wraps only HTTP-status failures in ApiError; transport errors escape raw.
         raise OAuthFailed(f"Square OAuth unreachable: {type(exc).__name__}") from exc
