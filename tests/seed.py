@@ -29,6 +29,8 @@ LOC_B = "LOC_B"
 TEST_TOKEN_KEY = "ZXNsLXRlc3QtdG9rZW4ta2V5LTMyLWJ5dGVzLWxvbmc="
 # content_hash of the seeded VAR_A with no location override; must never change.
 GOLDEN_HASH_VAR_A = "bb654787078aaf3d75a41903a6b09bd73e4d041e1e15d34a1d2be2d239d7017f"
+# same variation shown at LOC_A2, where the seeded override is 1200 cents.
+GOLDEN_HASH_VAR_A_LOC_A2_OVERRIDE = "50849ffbc2256e0fe7db2f2ba0eb9b453bb4db82d0947f8af9fe9ad8196b9886"
 
 BUSINESS_TABLES = [
     "businesses", "stores", "catalog_items", "catalog_variations", "sync_cursors", "tags",

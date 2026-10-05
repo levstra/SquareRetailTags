@@ -11,9 +11,9 @@ from sqlalchemy.orm import selectinload
 from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
-from esl.tags.hashing import hash_projection
+from esl.tags.desired import apply_desired_state, projections_for
 from esl.tags.models import Tag
-from esl.tags.projection import UNASSIGNED, build_projection
+from esl.tags.projection import Projection
 from esl.web.deps import get_business_session, get_current_user, get_request_business_id
 
 router = APIRouter()
@@ -59,12 +59,7 @@ def _normalize_tag_id(tag_id: str) -> str:
     return tag_id.upper()
 
 
-def _tag_to_response(tag: Tag) -> TagResponse:
-    if tag.variation is not None:
-        proj = build_projection(tag.variation.item, tag.variation)
-    else:
-        proj = UNASSIGNED
-
+def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
     return TagResponse(
         id=tag.id,
         variation_id=tag.variation_id,
@@ -80,11 +75,6 @@ def _tag_to_response(tag: Tag) -> TagResponse:
     )
 
 
-_TAG_OPTIONS = [
-    selectinload(Tag.variation).selectinload(CatalogVariation.item)
-]
-
-
 def _ensure_store_allowed(user: CurrentUser, store_id: uuid.UUID) -> None:
     if not user.can_use_store(store_id):
         raise HTTPException(status_code=403, detail="You don't have access to this store")
@@ -95,11 +85,12 @@ async def list_tags(
     user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_business_session),
 ):
-    query = select(Tag).options(*_TAG_OPTIONS)
+    query = select(Tag)
     if user.store_ids is not None:
         query = query.where(Tag.store_id.in_(user.store_ids))
     tags = (await session.execute(query)).scalars().all()
-    return TagListResponse(tags=[_tag_to_response(t) for t in tags])
+    projections = await projections_for(session, tags)
+    return TagListResponse(tags=[_tag_to_response(t, projections[t.id]) for t in tags])
 
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)
@@ -109,11 +100,12 @@ async def get_tag(
     session: AsyncSession = Depends(get_business_session),
 ):
     tag_id = _normalize_tag_id(tag_id)
-    tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
+    tag = await session.get(Tag, tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
     _ensure_store_allowed(user, tag.store_id)
-    return _tag_to_response(tag)
+    projections = await projections_for(session, [tag])
+    return _tag_to_response(tag, projections[tag.id])
 
 
 async def _default_store_id(session: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
@@ -144,7 +136,7 @@ async def assign_tag(
         if variation is None:
             raise HTTPException(status_code=404, detail=f"Variation {body.variation_id} not found")
 
-    tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
+    tag = await session.get(Tag, tag_id)
     if tag is None:
         store_id = await _default_store_id(session, user)
         if store_id is None:
@@ -156,21 +148,19 @@ async def assign_tag(
 
     tag.variation_id = body.variation_id
 
-    if variation is not None:
-        proj = build_projection(variation.item, variation)
-        tag.content_hash = hash_projection(proj)
-    else:
-        tag.content_hash = hash_projection(UNASSIGNED)
-
     try:
+        # apply_desired_state queries (autoflush), so a foreign tag ID can
+        # surface here as well as at commit.
+        await apply_desired_state(session, tag)
         await session.commit()
     except IntegrityError:
         # RLS hid an existing tag with this ID in another business. Don't say so.
         await session.rollback()
         raise HTTPException(status_code=409, detail="This tag can't be used")
 
-    tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS, populate_existing=True)
-    return _tag_to_response(tag)
+    tag = await session.get(Tag, tag_id, populate_existing=True)
+    projections = await projections_for(session, [tag])
+    return _tag_to_response(tag, projections[tag.id])
 
 
 @router.post("/tags/{tag_id}/confirm", status_code=204)
