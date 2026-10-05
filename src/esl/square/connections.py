@@ -1,5 +1,6 @@
 """Per-business Square access. The only route from a business to a Square client."""
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -16,6 +17,12 @@ from esl.square.oauth import SCOPES, TokenGrant
 
 class SquareNotConnected(Exception):
     """The business has no active Square connection."""
+
+
+@dataclass(frozen=True)
+class SquareLocation:
+    id: str
+    name: str
 
 
 async def client_for_business(session: AsyncSession, business_id: uuid.UUID) -> Square:
@@ -79,3 +86,13 @@ async def save_grant(session: AsyncSession, business_id: uuid.UUID, grant: Token
 
 def is_unauthorized(exc: BaseException) -> bool:
     return isinstance(exc, ApiError) and exc.status_code == 401
+
+
+def active_locations(client: Square) -> list[SquareLocation]:
+    """Square's active locations for the client's merchant. Synchronous (SDK call)."""
+    response = client.locations.list()
+    return [
+        SquareLocation(id=location.id, name=location.name or location.id)
+        for location in (response.locations or [])
+        if location.status == "ACTIVE" and location.id
+    ]

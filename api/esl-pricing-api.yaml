@@ -199,6 +199,46 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /stores/selection:
+    put:
+      operationId: selectStores
+      summary: Use these Square locations as stores (owners only; additive)
+      description: >
+        Creates, links and renames stores for the chosen locations. Never
+        deletes a store. A store with no Square location is linked to the
+        first chosen location that has no store yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreSelection"
+      responses:
+        "200":
+          description: All stores after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreList"
+        "400":
+          description: Empty selection or a location that isn't an active Square location
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Square is not connected, or Square rejected the token (reconnect needed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          $ref: "#/components/responses/SquareUnavailable"
+
   /staff:
     get:
       operationId: listStaff
@@ -388,6 +428,30 @@ paths:
             Redirect to the dashboard. result is one of connected, error,
             merchant_in_use, different_merchant.
 
+  /square/locations:
+    get:
+      operationId: listSquareLocations
+      summary: Active Square locations and the store each is linked to (owners only)
+      responses:
+        "200":
+          description: Locations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SquareLocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Square is not connected, or Square rejected the token (reconnect needed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          $ref: "#/components/responses/SquareUnavailable"
+
 components:
   securitySchemes:
     cognitoBearer:
@@ -405,6 +469,13 @@ components:
             $ref: "#/components/schemas/Error"
     Forbidden:
       description: Signed in, but this user may not do this.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    SquareUnavailable:
+      description: Square returned an error other than an invalid token.
       content:
         application/json:
           schema:
@@ -563,6 +634,38 @@ components:
           format: uuid
         name:
           type: string
+
+    SquareLocation:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    SquareLocationList:
+      type: object
+      required: [locations]
+      properties:
+        locations:
+          type: array
+          items:
+            $ref: "#/components/schemas/SquareLocation"
+
+    StoreSelection:
+      type: object
+      required: [location_ids]
+      properties:
+        location_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
 
     StoreList:
       type: object

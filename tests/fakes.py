@@ -112,8 +112,13 @@ class FakeOAuth:
 class FakeLocations:
     def __init__(self):
         self.response = ListLocationsResponse.model_validate(load_fixture("list_locations.json"))
+        self.calls = 0
+        self.error: Exception | None = None
 
     def list(self) -> ListLocationsResponse:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
         return self.response
 
 

@@ -7,18 +7,21 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.auth.current_user import CurrentUser
-from esl.businesses.models import Business
+from esl.businesses.models import Business, Store
 from esl.catalog.models import SyncCursor
 from esl.catalog.sync import sync_business
 from esl.config import settings
 from esl.db import AsyncSessionLocal, business_session
 from esl.square import connections, oauth
 from esl.square.models import OAuthState, SquareConnection
+from esl.tags.desired import apply_desired_state
+from esl.tags.models import Tag
+from esl.web.routers.account import StoreList, allowed_stores
 from esl.web.deps import get_business_session, get_current_user, require_owner
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,21 @@ class SquareConnectionOut(BaseModel):
 
 class AuthorizeUrl(BaseModel):
     authorize_url: str
+
+
+class SquareLocationOut(BaseModel):
+    id: str
+    name: str
+    store_id: uuid.UUID | None = None
+
+
+class SquareLocationList(BaseModel):
+    locations: list[SquareLocationOut]
+
+
+class StoreSelection(BaseModel):
+    # No min_length: an empty list is a 400 from the handler (the spec says 400, not 422).
+    location_ids: list[str]
 
 
 def _cookie_secure() -> bool:
@@ -147,3 +165,82 @@ async def _complete_connect(business_id: uuid.UUID, code: str) -> str:
             # Another business linked this merchant concurrently.
             return "merchant_in_use"
     return "connected"
+
+
+async def _square_locations(session: AsyncSession, business_id: uuid.UUID) -> list[connections.SquareLocation]:
+    """Active Square locations, or the HTTP error the dashboard should see."""
+    try:
+        client = await connections.client_for_business(session, business_id)
+    except connections.SquareNotConnected:
+        raise HTTPException(status_code=409, detail="Connect Square first")
+    try:
+        return await asyncio.to_thread(connections.active_locations, client)
+    except Exception as exc:
+        if connections.is_unauthorized(exc):
+            # Same handling as sync_business: the token is dead until the owner reconnects.
+            await session.rollback()
+            await connections.set_status(session, business_id, "needs_reconnect")
+            await session.commit()
+            logger.warning("Square rejected the token for business %s: needs reconnect", business_id)
+            raise HTTPException(status_code=409, detail="Reconnect Square")
+        logger.exception("Listing Square locations failed for business %s", business_id)
+        raise HTTPException(status_code=502, detail="Square is unavailable")
+
+
+@router.get("/square/locations", response_model=SquareLocationList)
+async def list_square_locations(
+    owner: CurrentUser = Depends(require_owner),
+    session: AsyncSession = Depends(get_business_session),
+):
+    locations = await _square_locations(session, owner.business_id)
+    linked = dict((await session.execute(
+        select(Store.square_location_id, Store.id).where(Store.square_location_id.is_not(None))
+    )).all())
+    return SquareLocationList(locations=[
+        SquareLocationOut(id=loc.id, name=loc.name, store_id=linked.get(loc.id)) for loc in locations
+    ])
+
+
+@router.put("/stores/selection", response_model=StoreList)
+async def select_stores(
+    body: StoreSelection,
+    owner: CurrentUser = Depends(require_owner),
+    session: AsyncSession = Depends(get_business_session),
+):
+    """Additive: creates, links and renames stores; never deletes one, never touches user_stores."""
+    chosen = list(dict.fromkeys(body.location_ids))  # de-duplicate, keep order
+    if not chosen:
+        raise HTTPException(status_code=400, detail="Choose at least one location")
+    available = {loc.id: loc for loc in await _square_locations(session, owner.business_id)}
+    if any(location_id not in available for location_id in chosen):
+        raise HTTPException(status_code=400, detail="Unknown location")
+
+    stores = (await session.execute(select(Store).order_by(Store.created_at, Store.id))).scalars().all()
+    by_location = {s.square_location_id: s for s in stores if s.square_location_id is not None}
+    unlinked = [s for s in stores if s.square_location_id is None]
+
+    relinked: list[uuid.UUID] = []
+    for location_id in chosen:
+        name = available[location_id].name
+        store = by_location.get(location_id)
+        if store is not None:
+            store.name = name
+        elif unlinked:
+            # The pre-Square store (step 2's "Main store") becomes this location.
+            store = unlinked.pop(0)
+            store.square_location_id = location_id
+            store.name = name
+            relinked.append(store.id)
+        else:
+            session.add(Store(id=uuid.uuid4(), business_id=owner.business_id,
+                              square_location_id=location_id, name=name))
+    await session.flush()
+
+    # A store's location decides which price override its tags show.
+    if relinked:
+        tags = (await session.execute(select(Tag).where(Tag.store_id.in_(relinked)))).scalars().all()
+        for tag in tags:
+            await apply_desired_state(session, tag)
+
+    await session.commit()
+    return StoreList(stores=await allowed_stores(session, owner))
