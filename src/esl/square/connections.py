@@ -11,6 +11,7 @@ from esl.crypto import get_cipher
 from esl.db import AsyncSessionLocal
 from esl.square.client import client_for_token
 from esl.square.models import SquareConnection
+from esl.square.oauth import SCOPES, TokenGrant
 
 
 class SquareNotConnected(Exception):
@@ -45,6 +46,35 @@ async def set_status(session: AsyncSession, business_id: uuid.UUID, status: str)
     if connection is not None:
         connection.status = status
         connection.updated_at = datetime.now(timezone.utc)
+
+
+async def save_grant(session: AsyncSession, business_id: uuid.UUID, grant: TokenGrant) -> None:
+    """Store (encrypted) tokens and mark the connection active. Does not commit."""
+    cipher = get_cipher()
+    now = datetime.now(timezone.utc)
+    connection = await session.get(SquareConnection, business_id)
+    if connection is None:
+        if not grant.refresh_token:
+            raise ValueError("a new connection needs a refresh token")
+        session.add(SquareConnection(
+            business_id=business_id,
+            merchant_id=grant.merchant_id,
+            access_token_enc=cipher.encrypt(grant.access_token),
+            refresh_token_enc=cipher.encrypt(grant.refresh_token),
+            expires_at=grant.expires_at,
+            scopes=" ".join(SCOPES),
+            status="active",
+            updated_at=now,
+        ))
+        return
+    connection.merchant_id = grant.merchant_id
+    connection.access_token_enc = cipher.encrypt(grant.access_token)
+    if grant.refresh_token:
+        connection.refresh_token_enc = cipher.encrypt(grant.refresh_token)
+    connection.expires_at = grant.expires_at
+    connection.scopes = " ".join(SCOPES)
+    connection.status = "active"
+    connection.updated_at = now
 
 
 def is_unauthorized(exc: BaseException) -> bool:

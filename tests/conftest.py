@@ -122,4 +122,5 @@ def fake_square(monkeypatch):
         return fake
 
     monkeypatch.setattr("esl.square.connections.client_for_business", client_for_business)
+    monkeypatch.setattr("esl.square.oauth.oauth_client", lambda: fake)
     return fake

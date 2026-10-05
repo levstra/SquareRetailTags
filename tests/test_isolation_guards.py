@@ -5,13 +5,17 @@ import esl.db
 from esl.web.app import app
 from esl.web.deps import get_business_session, get_current_user
 
-# Routes that touch no business data, or resolve the business themselves.
-UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square"}
+# Routes that touch no business data, or resolve the business themselves:
+# - the Square webhook resolves it from the signed event's merchant_id;
+# - the OAuth callback resolves it from the single-use state row
+#   (esl_oauth_state_take). Square redirects the browser here without our token.
+UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square", "/v1/square/oauth/callback"}
 
 # Known scoped routes that must exist and be checked.
 REQUIRED_SCOPED_ROUTES = {
     "/v1/tags", "/v1/tags/{tag_id}", "/v1/tags/{tag_id}/confirm", "/v1/catalog/variations",
     "/v1/me", "/v1/stores", "/v1/staff", "/v1/staff/{user_id}",
+    "/v1/square/connection", "/v1/square/oauth/start",
 }
 
 

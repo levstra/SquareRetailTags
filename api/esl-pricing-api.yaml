@@ -297,6 +297,94 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /square/connection:
+    get:
+      operationId: getSquareConnection
+      summary: This business's Square connection status
+      responses:
+        "200":
+          description: Connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SquareConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /square/oauth/start:
+    post:
+      operationId: startSquareOAuth
+      summary: Begin connecting this business's Square account (owners only)
+      description: >
+        Also sets the esl_square_oauth_state cookie (HttpOnly, SameSite=Lax,
+        Path=/v1/square/oauth/callback, 10 minutes, Secure over https). The
+        callback accepts the state only from the browser holding that cookie.
+      responses:
+        "200":
+          description: Send the browser to authorize_url
+          headers:
+            Set-Cookie:
+              description: >
+                esl_square_oauth_state=<state>; HttpOnly; SameSite=Lax;
+                Path=/v1/square/oauth/callback; Max-Age=600 (plus Secure over https)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizeUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Square OAuth is not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /square/oauth/callback:
+    get:
+      operationId: squareOAuthCallback
+      summary: Square redirects here after the owner approves or declines
+      description: >
+        Public. The business comes from the single-use state, never from the
+        query. The state must match the esl_square_oauth_state cookie set by
+        startSquareOAuth, or it is not consumed and the code is not exchanged.
+        Always redirects to /settings/square?result=<result> and clears the
+        cookie.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: esl_square_oauth_state
+          in: cookie
+          required: false
+          description: The state set by startSquareOAuth in this browser.
+          schema:
+            type: string
+      responses:
+        "302":
+          description: >
+            Redirect to the dashboard. result is one of connected, error,
+            merchant_in_use, different_merchant.
+
 components:
   securitySchemes:
     cognitoBearer:
@@ -562,3 +650,21 @@ components:
             format: uuid
         disabled:
           type: boolean
+
+    SquareConnection:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [not_connected, active, needs_reconnect, revoked]
+        merchant_id:
+          type: string
+          nullable: true
+
+    AuthorizeUrl:
+      type: object
+      required: [authorize_url]
+      properties:
+        authorize_url:
+          type: string

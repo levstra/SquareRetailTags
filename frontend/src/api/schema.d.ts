@@ -174,6 +174,63 @@ export interface paths {
         patch: operations["updateStaff"];
         trace?: never;
     };
+    "/square/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This business's Square connection status */
+        get: operations["getSquareConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/square/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin connecting this business's Square account (owners only)
+         * @description Also sets the esl_square_oauth_state cookie (HttpOnly, SameSite=Lax, Path=/v1/square/oauth/callback, 10 minutes, Secure over https). The callback accepts the state only from the browser holding that cookie.
+         */
+        post: operations["startSquareOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/square/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Square redirects here after the owner approves or declines
+         * @description Public. The business comes from the single-use state, never from the query. The state must match the esl_square_oauth_state cookie set by startSquareOAuth, or it is not consumed and the code is not exchanged. Always redirects to /settings/square?result=<result> and clears the cookie.
+         */
+        get: operations["squareOAuthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -277,6 +334,14 @@ export interface components {
             /** @description Replaces allowed stores. Empty means every store. */
             store_ids?: string[];
             disabled?: boolean;
+        };
+        SquareConnection: {
+            /** @enum {string} */
+            status: "not_connected" | "active" | "needs_reconnect" | "revoked";
+            merchant_id?: string | null;
+        };
+        AuthorizeUrl: {
+            authorize_url: string;
         };
     };
     responses: {
@@ -655,6 +720,86 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
+            };
+        };
+    };
+    getSquareConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquareConnection"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    startSquareOAuth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Send the browser to authorize_url */
+            200: {
+                headers: {
+                    /** @description esl_square_oauth_state=<state>; HttpOnly; SameSite=Lax; Path=/v1/square/oauth/callback; Max-Age=600 (plus Secure over https) */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizeUrl"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Square OAuth is not configured on the server */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    squareOAuthCallback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                /** @description The state set by startSquareOAuth in this browser. */
+                esl_square_oauth_state?: string;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the dashboard. result is one of connected, error, merchant_in_use, different_merchant. */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
