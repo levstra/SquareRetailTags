@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Response
@@ -105,20 +106,35 @@ async def square_oauth_callback(
         return _settings_redirect("error")
     business_id = taken.business_id
 
+    # The state is spent: whatever happens now, the browser gets a redirect.
+    try:
+        result = await _complete_connect(business_id, code)
+    except Exception:
+        logger.exception("Square connect failed for business %s", business_id)
+        return _settings_redirect("error")
+    if result == "connected":
+        # Every successful connect syncs (a reconnect may have missed webhooks).
+        background_tasks.add_task(sync_business, business_id)
+    return _settings_redirect(result)
+
+
+async def _complete_connect(business_id: uuid.UUID, code: str) -> str:
+    """Exchange the code and link the business. Returns the callback result."""
     try:
         grant = await asyncio.to_thread(oauth.exchange_code, code)
-    except oauth.OAuthFailed:
-        logger.warning("Square code exchange failed for business %s", business_id)
-        return _settings_redirect("error")
+    except oauth.OAuthFailed as exc:
+        # OAuthFailed messages are token-free; the chained SDK error is not logged.
+        logger.warning("Square code exchange failed for business %s: %s", business_id, exc)
+        return "error"
 
     linked_to = await connections.business_for_merchant(grant.merchant_id)
     if linked_to is not None and linked_to != business_id:
-        return _settings_redirect("merchant_in_use")
+        return "merchant_in_use"
 
     async with business_session(business_id) as session:
         business = await session.get(Business, business_id)
         if business.square_merchant_id not in (None, grant.merchant_id):
-            return _settings_redirect("different_merchant")
+            return "different_merchant"
         first_link = business.square_merchant_id is None
         business.square_merchant_id = grant.merchant_id
         await connections.save_grant(session, business_id, grant)
@@ -129,8 +145,5 @@ async def square_oauth_callback(
             await session.commit()
         except IntegrityError:
             # Another business linked this merchant concurrently.
-            return _settings_redirect("merchant_in_use")
-
-    # Every successful connect syncs (a reconnect may have missed webhooks).
-    background_tasks.add_task(sync_business, business_id)
-    return _settings_redirect("connected")
+            return "merchant_in_use"
+    return "connected"

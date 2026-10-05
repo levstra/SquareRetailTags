@@ -1,6 +1,7 @@
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import pytest
 from sqlalchemy import text
 from square.core.api_error import ApiError
@@ -180,6 +181,31 @@ async def test_state_is_single_use(client, anon_client, square_app, fake_square)
 async def test_square_error_redirects_with_error(client, anon_client, square_app, fake_square):
     fake_square.o_auth.error = ApiError(status_code=400, body={"errors": [{"code": "BAD_REQUEST"}]})
     assert _result(await _connect(client, anon_client)) == "error"
+
+
+async def test_square_unreachable_redirects_with_error(client, anon_client, square_app, fake_square):
+    fake_square.o_auth.error = httpx.ConnectError("connection refused")
+    assert _result(await _connect(client, anon_client)) == "error"  # _result checks the cookie is cleared
+
+
+async def test_malformed_token_expiry_redirects_with_error(client, anon_client, square_app, fake_square, admin_session):
+    fake_square.o_auth.response = token_response("MERCHANT_B", expires_at="not-a-timestamp")
+    assert _result(await _connect(client, anon_client, bearer(OWNER_B_SUB))) == "error"
+    status = (await admin_session.execute(
+        text("select status from square_connections where business_id = :b"), {"b": BUSINESS_B}
+    )).scalar_one()
+    assert status == "needs_reconnect"
+
+
+async def test_unexpected_failure_after_state_is_taken_redirects_with_error(
+    client, anon_client, square_app, fake_square, monkeypatch
+):
+    async def broken(_merchant_id):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr("esl.square.connections.business_for_merchant", broken)
+    fake_square.o_auth.response = token_response("MERCHANT_B")
+    assert _result(await _connect(client, anon_client, bearer(OWNER_B_SUB))) == "error"
 
 
 async def test_first_link_runs_a_full_sync(client, anon_client, square_app, fake_square, admin_session):

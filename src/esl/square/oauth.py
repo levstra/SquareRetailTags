@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlencode
 
+import httpx
 from square import Square
 from square.core.api_error import ApiError
 
@@ -69,11 +70,19 @@ def _obtain(**kwargs) -> TokenGrant:
         )
     except ApiError as exc:
         raise OAuthFailed(f"Square OAuth error {exc.status_code}") from exc
+    except httpx.HTTPError as exc:
+        # The SDK wraps only HTTP-status failures in ApiError; transport errors escape raw.
+        raise OAuthFailed(f"Square OAuth unreachable: {type(exc).__name__}") from exc
     if response.errors or not (response.access_token and response.merchant_id and response.expires_at):
         raise OAuthFailed("Square OAuth response had no usable token")
+    try:
+        expires_at = datetime.fromisoformat(response.expires_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        # Message names the field only, never token values.
+        raise OAuthFailed("Square OAuth response had an unreadable expires_at") from exc
     return TokenGrant(
         access_token=response.access_token,
         refresh_token=response.refresh_token,
-        expires_at=datetime.fromisoformat(response.expires_at.replace("Z", "+00:00")),
+        expires_at=expires_at,
         merchant_id=response.merchant_id,
     )
