@@ -1,5 +1,7 @@
-"""In-process periodic jobs. Each run takes a Postgres advisory lock, so when
-App Runner runs several instances only one of them does the work."""
+"""In-process periodic jobs. Each run takes a Postgres advisory lock, so runs
+of one job never overlap across App Runner instances. Each instance keeps its
+own interval, though: with N instances a job runs about N times per interval.
+Every job is idempotent, so that only costs extra work."""
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable

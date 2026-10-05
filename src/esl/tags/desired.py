@@ -17,7 +17,8 @@ from esl.tags.projection import UNASSIGNED, Projection, build_projection
 
 
 async def projections_for(session: AsyncSession, tags: Sequence[Tag]) -> dict[str, Projection]:
-    """Desired projection per tag id, in three queries regardless of tag count."""
+    """Desired projection per tag id, in at most four queries regardless of tag count:
+    variations, their items (selectinload), location overrides, store locations."""
     variation_ids = {t.variation_id for t in tags if t.variation_id is not None}
     store_ids = {t.store_id for t in tags}
 

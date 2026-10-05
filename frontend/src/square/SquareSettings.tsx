@@ -86,6 +86,8 @@ export function SquareSettings({ result }: { result: string | null }) {
       void queryClient.invalidateQueries({ queryKey: ["square-locations"] });
       void queryClient.invalidateQueries({ queryKey: ["stores"] });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
+      // Linking a store changes which location price its tags show.
+      void queryClient.invalidateQueries({ queryKey: ["tags"] });
     },
     onError: (e) => {
       handle409(e);
