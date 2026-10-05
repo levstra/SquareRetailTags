@@ -83,7 +83,10 @@ The dashboard requires a Cognito login. One-time dev setup:
 
 1. `powershell -ExecutionPolicy Bypass -File .\scripts\dev_cognito.ps1 -DomainPrefix esl-dev-<yourname>`
 2. Put the printed values in `.env` and `frontend/.env.local`.
-3. Give yourself access to the dev data (the default business):
+   If the pool lives under a named AWS profile, set `AWS_PROFILE` in every
+   shell that runs `esl admin` or the backend. Both call Cognito.
+3. Bring your database up to date: `.venv\Scripts\python -m alembic upgrade head`.
+4. Give yourself access to the dev data (the default business):
    `.venv\Scripts\esl admin invite-user --business 00000000-0000-0000-0000-000000000001 --email <you> --role owner`
    Cognito emails a temporary password; you set a new one on first sign-in.
 
