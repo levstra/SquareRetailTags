@@ -7,10 +7,12 @@ import {
   useReactTable,
   type SortingState,
 } from "@tanstack/react-table";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, clearRedirectMarker } from "./api/client";
 import type { components } from "./api/schema.d.ts";
 import { signOut } from "./auth/userManager";
+import { SquareSettings } from "./square/SquareSettings";
+import { squareConnectionQuery } from "./square/queries";
 import { StaffPanel } from "./staff/StaffPanel";
 
 type Tag = components["schemas"]["Tag"];
@@ -294,11 +296,21 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
+type Tab = "tags" | "staff" | "square";
+
+// Square's OAuth callback lands on /settings/square?result=...; read it once.
+const returnedFromSquare = window.location.pathname === "/settings/square";
+const squareResult = returnedFromSquare ? new URLSearchParams(window.location.search).get("result") : null;
+
 export default function App() {
   const [modal, setModal] = useState<
     { tagId: string; variationId?: string | null } | "new" | null
   >(null);
-  const [tab, setTab] = useState<"tags" | "staff">("tags");
+  const [tab, setTab] = useState<Tab>(returnedFromSquare ? "square" : "tags");
+
+  useEffect(() => {
+    if (window.location.pathname !== "/") window.history.replaceState({}, document.title, "/");
+  }, []);
 
   const { data: me, error: meError } = useQuery({
     queryKey: ["me"],
@@ -310,6 +322,9 @@ export default function App() {
     },
     retry: false,
   });
+
+  const { data: square } = useQuery({ ...squareConnectionQuery, enabled: !!me });
+  const squareNeedsAttention = square != null && square.status !== "active";
 
   const tabClass = (t: typeof tab) =>
     `px-3 py-1.5 text-sm rounded ${tab === t ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`;
@@ -347,6 +362,11 @@ export default function App() {
                 Staff
               </button>
             )}
+            {me?.role === "owner" && (
+              <button className={tabClass("square")} onClick={() => setTab("square")}>
+                Square
+              </button>
+            )}
           </nav>
         </div>
         <div className="flex items-center gap-3">
@@ -367,6 +387,21 @@ export default function App() {
         </div>
       </header>
 
+      {squareNeedsAttention && (
+        <div className="border-b border-yellow-200 bg-yellow-50 px-6 py-2 text-sm text-yellow-900">
+          {me?.role === "owner" ? (
+            <>
+              Prices aren't syncing from Square.{" "}
+              <button className="underline" onClick={() => setTab("square")}>
+                {square?.status === "not_connected" ? "Connect Square" : "Reconnect Square"}
+              </button>
+            </>
+          ) : (
+            "Prices aren't syncing from Square. Ask the business owner to reconnect Square."
+          )}
+        </div>
+      )}
+
       <main className="p-6">
         {tab === "tags" ? (
           <TagGrid
@@ -374,8 +409,10 @@ export default function App() {
               setModal({ tagId: tag.id, variationId: tag.variation_id })
             }
           />
-        ) : (
+        ) : tab === "staff" ? (
           <StaffPanel />
+        ) : (
+          <SquareSettings result={squareResult} />
         )}
       </main>
 
