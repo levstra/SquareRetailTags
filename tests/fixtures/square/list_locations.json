@@ -1,0 +1,8 @@
+{
+  "locations": [
+    {"id": "LOC_A", "name": "Downtown", "status": "ACTIVE"},
+    {"id": "LOC_A2", "name": "Uptown", "status": "ACTIVE"},
+    {"id": "LOC_NEW", "name": "Airport", "status": "ACTIVE"},
+    {"id": "LOC_OLD", "name": "Closed", "status": "INACTIVE"}
+  ]
+}

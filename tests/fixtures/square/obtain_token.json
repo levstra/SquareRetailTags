@@ -1,0 +1,7 @@
+{
+  "access_token": "at-new",
+  "token_type": "bearer",
+  "expires_at": "2026-11-03T12:00:00Z",
+  "merchant_id": "MERCHANT_A",
+  "refresh_token": "rt-new"
+}

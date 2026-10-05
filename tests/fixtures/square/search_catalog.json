@@ -1,0 +1,37 @@
+{
+  "objects": [
+    {
+      "type": "ITEM",
+      "id": "ITEM_A",
+      "updated_at": "2026-10-04T11:00:00.000Z",
+      "version": 1,
+      "is_deleted": false,
+      "present_at_all_locations": true,
+      "item_data": {
+        "name": "Item A",
+        "variations": [
+          {
+            "type": "ITEM_VARIATION",
+            "id": "VAR_A",
+            "updated_at": "2026-10-04T11:00:00.000Z",
+            "version": 1,
+            "present_at_all_locations": true,
+            "absent_at_location_ids": ["LOC_GONE"],
+            "item_variation_data": {
+              "item_id": "ITEM_A",
+              "name": "Regular",
+              "sku": "SKU-A",
+              "pricing_type": "FIXED_PRICING",
+              "price_money": {"amount": 1000, "currency": "USD"},
+              "location_overrides": [
+                {"location_id": "LOC_A2", "price_money": {"amount": 1300, "currency": "USD"}},
+                {"location_id": "LOC_A", "track_inventory": true}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "latest_time": "2026-10-04T12:00:00.000Z"
+}

@@ -16,7 +16,6 @@ APP_URL = f"postgresql+asyncpg://esl_app_test:esl_app_test@{PG}/esl_test"
 # Must be set before anything imports esl.config (env beats .env).
 os.environ["ADMIN_DATABASE_URL"] = ADMIN_URL
 os.environ["DATABASE_URL"] = APP_URL
-os.environ["SQUARE_TOKEN"] = "test-token"
 os.environ["SQUARE_WEBHOOK_SIGNATURE_KEY"] = ""
 os.environ["SQUARE_WEBHOOK_URL"] = ""
 os.environ["SQUARE_APPLICATION_ID"] = ""
@@ -110,3 +109,17 @@ async def app_conn():
     async with engine.connect() as conn:
         yield conn
     await engine.dispose()
+
+
+@pytest.fixture
+def fake_square(monkeypatch):
+    """Every per-business Square client becomes this fake (no network)."""
+    from tests.fakes import FakeSquare
+
+    fake = FakeSquare()
+
+    async def client_for_business(_session, _business_id):
+        return fake
+
+    monkeypatch.setattr("esl.square.connections.client_for_business", client_for_business)
+    return fake
