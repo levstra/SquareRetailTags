@@ -81,7 +81,7 @@ try {
         if (!(Test-Path '.env')) {
             if (!(Test-Path '.env.example')) { throw 'Missing .env and .env.example.' }
             Copy-Item '.env.example' '.env'
-            Write-Host 'Created .env. Fill in the required settings (including SQUARE_TOKEN), then rerun.' -ForegroundColor Yellow
+            Write-Host 'Created .env. Fill in the required settings (Square app credentials, TOKEN_ENCRYPTION_KEY, Cognito), then rerun.' -ForegroundColor Yellow
             return
         }
 

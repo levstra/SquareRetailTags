@@ -93,6 +93,31 @@ The dashboard requires a Cognito login. One-time dev setup:
 New client businesses: `esl admin create-business --name "<name>" --owner-email <owner>`.
 Owners invite staff from the dashboard's Staff tab.
 
+### Connecting Square
+
+Each business connects its own Square account (read-only: catalog and
+locations). There is no global Square token. If you are upgrading from step 2,
+delete `SQUARE_TOKEN` (and `DEFAULT_BUSINESS_ID` if present) from your `.env`:
+the app now refuses unknown settings at startup.
+
+One-time dev setup in the Square Developer Console (your app, **Sandbox**):
+
+1. **OAuth** page → Redirect URL: `http://localhost:5173/v1/square/oauth/callback` → Save.
+   Copy the sandbox application secret into `SQUARE_APPLICATION_SECRET`.
+2. **Credentials** page → copy the sandbox application ID into `SQUARE_APPLICATION_ID`.
+3. **Webhooks → Subscriptions** → your subscription → Edit → events
+   `catalog.version.updated` and `oauth.authorization.revoked`. The URL must
+   equal `SQUARE_WEBHOOK_URL`.
+4. Generate `TOKEN_ENCRYPTION_KEY` (command in `.env.example`).
+
+Then, signed in to the dashboard as an owner: **Square** tab → **Connect
+Square** → approve → choose your locations → **Save stores**. Prices sync
+right away, on every Square webhook, and every 15 minutes as a safety net.
+
+Tip for sandbox: open your sandbox test account's Square Dashboard from the
+Developer Console first ("Sandbox test accounts" → "Open in Square
+Dashboard"), so the approval page is already signed in to it.
+
 ---
 
 ## API calls for the Pi gateway
