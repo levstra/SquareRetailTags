@@ -122,5 +122,14 @@ Keys and store codes are issued by the operator:
 (prints the key once). On the Pi set `CentralApi__BaseUrl`,
 `CentralApi__StoreId` and `CentralApi__ApiKey`.
 
+After migrating an existing database to `0006`, and after replacing a Pi, run
+`esl admin push-all --business <id> [--store <id>]`. Existing tags start at
+version 0 and are only sent a command when their content changes, so without
+this they get nothing.
+
+Downgrading migration `0006` is destructive and effectively one-way once a Pi
+has received commands: versions restart at 0, and the Pi (which keeps the
+highest version it applied per tag) reports every later update as Superseded.
+
 To run the Pi service against a local central API, see "End-to-end with the
 real Pi" in `docs/superpowers/plans/2026-10-04-step4-gateway-contract.md`.

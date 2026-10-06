@@ -189,6 +189,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Destructive, and effectively one-way once a Pi has received commands.
+
+    Drops the command queue and tags.version. Versions then restart at 0, while the
+    Pi keeps the highest version it applied per tag, so it would report every later
+    update as Superseded and no tag would change until each passed its old version.
+    """
     op.execute("DROP FUNCTION esl_businesses_with_open_commands()")
     op.execute("DROP FUNCTION esl_gateway_for_key(text)")
     for table in ("access_point_status", "label_telemetry", "label_updates", "gateways"):
