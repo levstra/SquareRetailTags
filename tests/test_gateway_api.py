@@ -95,6 +95,14 @@ async def test_pending_only_returns_this_store_pending_and_due(anon_client):
     assert [u["updateId"] for u in response.json()["updates"]] == [str(due)]
 
 
+async def test_pending_never_returns_another_store_of_the_same_business(anon_client):
+    # Same business, so RLS allows the row: only the store filter keeps it from STORE-001's Pi.
+    await insert_command(update_id=uuid.uuid4(), tag_id="A2A2A2A2A2A2", version=1, store_id=STORE_A2)
+    mine = uuid.uuid4()
+    await insert_command(update_id=mine, tag_id="AAAAAAAAAAA5", version=1)
+    response = await anon_client.get(PENDING, params={"storeId": "STORE-001"}, headers=key(GATEWAY_A_KEY))
+    assert [u["updateId"] for u in response.json()["updates"]] == [str(mine)]
+
 async def test_pending_pages_with_has_more(anon_client):
     base = datetime(2026, 10, 1, tzinfo=UTC)
     for i in range(3):
@@ -186,6 +194,16 @@ async def test_out_of_order_accepted_does_not_regress_terminal(anon_client):
     assert (await command_row(update_id)).status == "Succeeded"
 
 
+async def test_accepted_never_regresses_a_centrally_superseded_command(anon_client):
+    update_id = uuid.UUID(UPDATE_COMMAND["updateId"])
+    await insert_command(update_id=update_id, tag_id=UPDATE_COMMAND["tagId"], version=42, status="Superseded")
+    accepted = {**SUCCEEDED_REPORT, "status": "Accepted", "statusAt": "2026-09-05T14:03:05Z",
+                "attempt": 0, "apId": None, "diagnostics": None}
+    assert (await _post_status(anon_client, [accepted])).json() == {"acceptedCount": 1}
+    row = await command_row(update_id)
+    assert (row.status, row.dispatched_at) == ("Superseded", None)
+
+
 async def test_duplicates_are_counted(anon_client):
     await _insert_example(UPDATE_COMMAND)
     response = await _post_status(anon_client, [SUCCEEDED_REPORT, SUCCEEDED_REPORT, SUCCEEDED_REPORT])
@@ -202,6 +220,16 @@ async def test_batch_with_a_foreign_command_is_rejected_whole(anon_client):
     assert response.status_code == 400
     assert (await command_row(mine)).status == "Pending"
 
+
+async def test_report_for_another_store_of_the_same_business_is_rejected_whole(anon_client):
+    mine = await _insert_example(UPDATE_COMMAND)
+    other_store = uuid.uuid4()
+    await insert_command(update_id=other_store, tag_id="A2A2A2A2A2A2", version=1, store_id=STORE_A2)
+    foreign = {**SUCCEEDED_REPORT, "updateId": str(other_store), "tagId": "A2A2A2A2A2A2", "version": 1}
+    response = await _post_status(anon_client, [SUCCEEDED_REPORT, foreign])
+    assert response.status_code == 400
+    assert (await command_row(mine)).status == "Pending"
+    assert (await command_row(other_store)).status == "Pending"
 
 @pytest.mark.parametrize("bad", [
     {**SUCCEEDED_REPORT, "status": "SentToAp"},
