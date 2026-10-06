@@ -118,11 +118,7 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
             vd = var.item_variation_data
             pricing_type = (vd.pricing_type or "FIXED_PRICING").upper()
             price = vd.price_money.amount if vd.price_money is not None else None
-            currency = (
-                str(vd.price_money.currency)
-                if vd.price_money is not None and vd.price_money.currency
-                else None
-            )
+            currency = _variation_currency(vd)
             var_updated_at = _parse_dt(var.updated_at)
 
             presence = {
@@ -213,6 +209,27 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
         "tags_rehashed": tags_rehashed,
         "latest_time": latest_time,
     }
+
+
+def _money_currency(money) -> str | None:
+    return str(money.currency) if money is not None and money.currency else None
+
+
+def _variation_currency(vd) -> str | None:
+    """The base price's currency, else any location override's.
+
+    A variation that is variable at base but fixed at a location has a price at that
+    store; without a currency its tag would be sent Unassign while the dashboard shows
+    the price.
+    """
+    base = _money_currency(vd.price_money)
+    if base is not None:
+        return base
+    for override in vd.location_overrides or []:
+        currency = _money_currency(override.price_money)
+        if currency is not None:
+            return currency
+    return None
 
 
 def _override_row(override, base_price: int | None, base_pricing_type: str) -> dict | None:

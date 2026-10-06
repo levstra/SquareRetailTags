@@ -1,0 +1,34 @@
+{
+  "objects": [
+    {
+      "type": "ITEM",
+      "id": "ITEM_OPEN",
+      "updated_at": "2026-10-04T11:00:00.000Z",
+      "version": 1,
+      "is_deleted": false,
+      "present_at_all_locations": true,
+      "item_data": {
+        "name": "Open Box Singles",
+        "variations": [
+          {
+            "type": "ITEM_VARIATION",
+            "id": "VAR_OPEN",
+            "updated_at": "2026-10-04T11:00:00.000Z",
+            "version": 1,
+            "present_at_all_locations": true,
+            "item_variation_data": {
+              "item_id": "ITEM_OPEN",
+              "name": "Regular",
+              "pricing_type": "VARIABLE_PRICING",
+              "location_overrides": [
+                {"location_id": "LOC_A", "pricing_type": "FIXED_PRICING",
+                 "price_money": {"amount": 2500, "currency": "USD"}}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "latest_time": "2026-10-04T12:00:00.000Z"
+}

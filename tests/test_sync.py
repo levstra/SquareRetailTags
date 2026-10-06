@@ -272,3 +272,29 @@ async def test_sync_business_not_connected_is_skipped(admin_session):
     # No fake_square: B's connection is needs_reconnect, so no client is built.
     assert await sync_business(BUSINESS_B) is None
     assert await _cursor(admin_session, BUSINESS_B) == "2026-01-02T00:00:00Z"
+
+
+async def _currency(admin_session, variation_id: str):
+    return (await admin_session.execute(text(
+        "select currency from catalog_variations where business_id = :a and id = :v"
+    ), {"a": BUSINESS_A, "v": variation_id})).scalar_one()
+
+
+async def test_recorded_response_stores_base_price_currency(fake_square, admin_session):
+    await admin_session.execute(text("update catalog_variations set currency = null"))
+    await admin_session.commit()
+    fake_square.catalog.objects = load_fixture("search_catalog.json")["objects"]
+    await _sync_a()
+    assert await _currency(admin_session, "VAR_A") == "USD"
+
+
+async def test_override_only_price_still_gets_a_currency(fake_square, admin_session):
+    # Variable at base, fixed at LOC_A: the store has a price, so its tag must not go blank.
+    fake_square.catalog.objects = load_fixture("search_catalog_override_only_price.json")["objects"]
+    await _sync_a()
+    assert await _currency(admin_session, "VAR_OPEN") == "USD"
+    override = (await admin_session.execute(text(
+        "select square_location_id, price from variation_location_prices "
+        "where business_id = :a and variation_id = 'VAR_OPEN'"
+    ), {"a": BUSINESS_A})).all()
+    assert override == [("LOC_A", 2500)]
