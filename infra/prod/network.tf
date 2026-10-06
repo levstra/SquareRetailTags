@@ -42,8 +42,9 @@ resource "aws_route_table_association" "public" {
 }
 
 # App Runner (via its VPC connector), RDS and Fargate tasks live here. With a
-# VPC connector attached, App Runner sends ALL egress through the VPC, so
-# Square, Cognito JWKS and ECR are reached through the NAT instance.
+# VPC connector attached, App Runner sends ALL outbound app traffic through the
+# VPC, so Square and Cognito JWKS go through the NAT instance. Fargate tasks
+# pull from ECR through the NAT + S3 endpoint.
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
   tags   = { Name = "${local.name}-private" }

@@ -46,7 +46,8 @@ resource "aws_instance" "nat" {
   vpc_security_group_ids      = [aws_security_group.nat.id]
   source_dest_check           = false # required to forward traffic it doesn't own
   iam_instance_profile        = aws_iam_instance_profile.nat.name
-  user_data                   = templatefile("${path.module}/nat-user-data.sh", { vpc_cidr = var.vpc_cidr })
+  associate_public_ip_address = true # needed at boot, before the EIP associates
+  user_data                   = replace(templatefile("${path.module}/nat-user-data.sh", { vpc_cidr = var.vpc_cidr }), "\r\n", "\n")
   user_data_replace_on_change = true
   metadata_options {
     http_tokens = "required"
