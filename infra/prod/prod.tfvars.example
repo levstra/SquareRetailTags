@@ -1,0 +1,7 @@
+# Copy to prod.tfvars (git-ignored).
+hosted_zone_name      = "levstra.com"
+app_subdomain         = "app"
+cognito_domain_prefix = "esl-prod-example"
+alarm_email           = "ops@example.com"
+square_application_id = "sq0idp-..."
+deploy_service        = false
