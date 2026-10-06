@@ -141,7 +141,6 @@ try {
             Write-Host 'Services started and migrations completed.' -ForegroundColor Green
         }
         Write-Host 'Tests: .\.venv\Scripts\python.exe -m pytest'
-        Write-Host 'Gateway: .\.venv\Scripts\python.exe scripts/gateway_sim.py --url http://localhost:8001 --interval 5'
     } finally {
         Pop-Location
     }

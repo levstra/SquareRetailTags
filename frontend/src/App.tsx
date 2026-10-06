@@ -44,8 +44,8 @@ function AssignModal({
   const mutation = useMutation({
     mutationFn: async () => {
       const id = tagId.trim().toUpperCase();
-      if (!/^[0-9A-F]{16}$/.test(id)) {
-        throw new Error("Tag ID must be exactly 16 uppercase hex characters");
+      if (!/^[0-9A-F]{12}$/.test(id)) {
+        throw new Error("Tag ID must be exactly 12 hex characters");
       }
       const { error } = await api.PUT("/tags/{tag_id}", {
         params: { path: { tag_id: id } },
@@ -78,13 +78,13 @@ function AssignModal({
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Tag ID (16-char hex)
+              Tag ID (12-char hex)
             </label>
             <input
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="AABBCCDD11223344"
+              placeholder="840001282A7E"
               value={tagId}
-              maxLength={16}
+              maxLength={12}
               readOnly={!!initial?.tagId}
               onChange={(e) => setTagId(e.target.value.toUpperCase())}
             />

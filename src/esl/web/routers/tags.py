@@ -1,8 +1,9 @@
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,20 +44,15 @@ class AssignBody(BaseModel):
     variation_id: str | None = None
 
 
-class ConfirmBody(BaseModel):
-    content_hash: str
-    battery_pct: int | None = None
-
-    @field_validator("battery_pct")
-    @classmethod
-    def battery_in_range(cls, v: int | None) -> int | None:
-        if v is not None and not (0 <= v <= 100):
-            raise ValueError("battery_pct must be 0–100")
-        return v
+_TAG_ID = re.compile(r"^[0-9A-F]{12}$")
 
 
-def _normalize_tag_id(tag_id: str) -> str:
-    return tag_id.upper()
+def normalize_tag_id(tag_id: str) -> str:
+    """Tag IDs are 12 uppercase hex characters (the Pi's and the hardware's format)."""
+    normalized = tag_id.strip().upper()
+    if not _TAG_ID.fullmatch(normalized):
+        raise HTTPException(status_code=422, detail="Tag ID must be 12 hexadecimal characters")
+    return normalized
 
 
 def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
@@ -106,7 +102,7 @@ async def get_tag(
     user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_business_session),
 ):
-    tag_id = _normalize_tag_id(tag_id)
+    tag_id = normalize_tag_id(tag_id)
     tag = await session.get(Tag, tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
@@ -131,7 +127,7 @@ async def assign_tag(
     business_id: uuid.UUID = Depends(get_request_business_id),
     session: AsyncSession = Depends(get_business_session),
 ):
-    tag_id = _normalize_tag_id(tag_id)
+    tag_id = normalize_tag_id(tag_id)
     _ensure_has_a_store(user)
 
     variation = None
@@ -169,22 +165,3 @@ async def assign_tag(
     tag = await session.get(Tag, tag_id, populate_existing=True)
     projections = await projections_for(session, [tag])
     return _tag_to_response(tag, projections[tag.id])
-
-
-@router.post("/tags/{tag_id}/confirm", status_code=204)
-async def confirm_tag(
-    tag_id: str,
-    body: ConfirmBody,
-    session: AsyncSession = Depends(get_business_session),
-):
-    tag_id = _normalize_tag_id(tag_id)
-    tag = await session.get(Tag, tag_id)
-    if tag is None:
-        raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
-
-    tag.last_confirmed_at = datetime.now(timezone.utc)
-    if body.battery_pct is not None:
-        tag.battery_pct = body.battery_pct
-
-    await session.commit()
-    return Response(status_code=204)

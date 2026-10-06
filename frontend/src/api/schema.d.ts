@@ -47,7 +47,7 @@ export interface paths {
         };
         /**
          * List all tags with their desired display state
-         * @description Tags in the stores the signed-in user may use (every store for owners and all-stores staff). A staff member with no store access gets an empty list. The gateway polls this endpoint to discover which tags need updating. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
+         * @description Tags in the stores the signed-in user may use (every store for owners and all-stores staff). A staff member with no store access gets an empty list. This is the dashboard's view; the Pi gateway does not use it (see the Pi contract).
          */
         get: operations["listTags"];
         put?: never;
@@ -71,32 +71,10 @@ export interface paths {
         get: operations["getTag"];
         /**
          * Create or update a tag's variation assignment
-         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately so the gateway picks up the change on its next poll. A staff member with no store access gets 403.
+         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately; the gateway receives the change as a command. A staff member with no store access gets 403.
          */
         put: operations["assignTag"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tags/{tag_id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tag_id: components["schemas"]["TagId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Gateway reports what it successfully rendered
-         * @description Called by the gateway after it has pushed content to the physical tag. The service records the confirmation timestamp and battery level.
-         */
-        post: operations["confirmTag"];
         delete?: never;
         options?: never;
         head?: never;
@@ -272,7 +250,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description 16-character uppercase hex tag identifier */
+        /** @description 12-character uppercase hex tag identifier (the Pi's and the hardware's format) */
         TagId: string;
         Tag: {
             id: components["schemas"]["TagId"];
@@ -286,7 +264,7 @@ export interface components {
             price?: number | null;
             /** @enum {string|null} */
             pricing_type?: "FIXED_PRICING" | "VARIABLE_PRICING" | null;
-            /** @description SHA-256 of the canonical projection. The gateway uses this to detect drift without re-fetching every tag's full content on every poll. */
+            /** @description SHA-256 of the canonical projection. Used by this service to detect changes; it is never sent to the gateway. */
             content_hash: string | null;
             /** Format: date-time */
             last_pushed_at?: string | null;
@@ -315,11 +293,6 @@ export interface components {
         AssignBody: {
             /** @description Variation to assign. Null to unassign. */
             variation_id?: string | null;
-        };
-        ConfirmBody: {
-            /** @description Hash of what was actually rendered, for drift detection */
-            content_hash: string;
-            battery_pct?: number | null;
         };
         Health: {
             /** @enum {string} */
@@ -530,6 +503,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The tag ID is not 12 hexadecimal characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     assignTag: {
@@ -576,34 +558,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-        };
-    };
-    confirmTag: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tag_id: components["schemas"]["TagId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConfirmBody"];
-            };
-        };
-        responses: {
-            /** @description Confirmation recorded */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description Tag not found */
-            404: {
+            /** @description The tag ID is not 12 hexadecimal characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

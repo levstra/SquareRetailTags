@@ -13,7 +13,7 @@ UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square", "/v1/square/oauth/callba
 
 # Known scoped routes that must exist and be checked.
 REQUIRED_SCOPED_ROUTES = {
-    "/v1/tags", "/v1/tags/{tag_id}", "/v1/tags/{tag_id}/confirm", "/v1/catalog/variations",
+    "/v1/tags", "/v1/tags/{tag_id}", "/v1/catalog/variations",
     "/v1/me", "/v1/stores", "/v1/staff", "/v1/staff/{user_id}",
     "/v1/square/connection", "/v1/square/oauth/start", "/v1/square/locations", "/v1/stores/selection",
 }

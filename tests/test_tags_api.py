@@ -51,11 +51,6 @@ async def test_claiming_other_business_tag_is_409(client, admin_session):
     assert row == (BUSINESS_B, "VAR_B")
 
 
-async def test_confirm_other_business_tag_is_404(client):
-    response = await client.post(f"/v1/tags/{TAG_B}/confirm", json={"content_hash": "x"})
-    assert response.status_code == 404
-
-
 async def test_business_resolver_is_the_only_seam(client):
     from esl.web.app import app
 

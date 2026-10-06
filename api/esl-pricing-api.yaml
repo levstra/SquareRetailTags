@@ -7,7 +7,7 @@ info:
     Dashboard API of the ESL Pricing Service. Every operation requires a
     Cognito access token (`Authorization: Bearer`) unless it declares
     `security: []`. The Pi gateway's contract is separate
-    (WestgateLabels/docs/CENTRAL-API-CONTRACT.md) and arrives in step 4.
+    (WestgateLabels/docs/CENTRAL-API-CONTRACT.md) and is not described here.
 
 servers:
   - url: /v1
@@ -52,9 +52,8 @@ paths:
       description: >
         Tags in the stores the signed-in user may use (every store for owners
         and all-stores staff). A staff member with no store access gets an
-        empty list. The gateway polls this endpoint to discover which tags
-        need updating. The gateway compares content_hash against what
-        it last rendered; if different, it fetches and pushes the new content.
+        empty list. This is the dashboard's view; the Pi gateway does not use it
+        (see the Pi contract).
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
@@ -94,13 +93,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: The tag ID is not 12 hexadecimal characters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     put:
       operationId: assignTag
       summary: Create or update a tag's variation assignment
       description: >
         Creates the tag if it does not exist. Pass variation_id to assign a
         catalog variation; pass null to unassign. content_hash is recomputed
-        immediately so the gateway picks up the change on its next poll.
+        immediately; the gateway receives the change as a command.
         A staff member with no store access gets 403.
       requestBody:
         required: true
@@ -125,43 +130,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "409":
-          description: >
-            The tag can't be used by this business (for example, it is
-            registered elsewhere). Deliberately does not say why.
+        "422":
+          description: The tag ID is not 12 hexadecimal characters
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
-  /tags/{tag_id}/confirm:
-    parameters:
-      - name: tag_id
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/TagId"
-    post:
-      operationId: confirmTag
-      summary: Gateway reports what it successfully rendered
-      description: >
-        Called by the gateway after it has pushed content to the physical tag.
-        The service records the confirmation timestamp and battery level.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ConfirmBody"
-      responses:
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "204":
-          description: Confirmation recorded
-        "404":
-          description: Tag not found
+        "409":
+          description: >
+            The tag can't be used by this business (for example, it is
+            registered elsewhere). Deliberately does not say why.
           content:
             application/json:
               schema:
@@ -484,8 +462,8 @@ components:
   schemas:
     TagId:
       type: string
-      pattern: "^[0-9A-F]{16}$"
-      description: 16-character uppercase hex tag identifier
+      pattern: "^[0-9A-F]{12}$"
+      description: 12-character uppercase hex tag identifier (the Pi's and the hardware's format)
 
     Tag:
       type: object
@@ -521,8 +499,8 @@ components:
           type: string
           nullable: true
           description: >
-            SHA-256 of the canonical projection. The gateway uses this to detect
-            drift without re-fetching every tag's full content on every poll.
+            SHA-256 of the canonical projection. Used by this service to detect
+            changes; it is never sent to the gateway.
         last_pushed_at:
           type: string
           format: date-time
@@ -593,20 +571,6 @@ components:
           type: string
           nullable: true
           description: Variation to assign. Null to unassign.
-
-    ConfirmBody:
-      type: object
-      required:
-        - content_hash
-      properties:
-        content_hash:
-          type: string
-          description: Hash of what was actually rendered, for drift detection
-        battery_pct:
-          type: integer
-          nullable: true
-          minimum: 0
-          maximum: 100
 
     Health:
       type: object
