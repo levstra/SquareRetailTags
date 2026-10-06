@@ -191,8 +191,9 @@ contract in a later release).
 ## Rollback
 
 ```powershell
-$sha = '<previous good commit>'
-aws ecr batch-get-image --repository-name esl-prod --image-ids imageTag=$sha --query 'images[0].imageManifest' --output text > manifest.json
+$sha = '<previous good commit>'   # the full 40-character sha (CI tags images with $GITHUB_SHA)
+$manifest = aws ecr batch-get-image --repository-name esl-prod --image-ids imageTag=$sha --query 'images[0].imageManifest' --output text
+[System.IO.File]::WriteAllText("$PWD\manifest.json", $manifest)   # not `>`: PowerShell 5.1 would write UTF-16
 aws ecr put-image --repository-name esl-prod --image-tag prod --image-manifest file://manifest.json
 aws apprunner start-deployment --service-arn <apprunner_service_arn>
 ```
@@ -232,8 +233,8 @@ changes), and once after migrating an existing database to `0006`.
 - Square / token key: `put-secret-value`, then `aws apprunner start-deployment`.
   Rotating `TOKEN_ENCRYPTION_KEY` makes stored Square tokens unreadable: every
   owner must reconnect Square. Don't rotate it without a re-encryption plan.
-- DB passwords: `terraform apply -replace=random_password.db_app` (or
-  `db_admin`), then `.\scripts\admin.ps1 -Task bootstrap` (re-sets passwords),
+- DB passwords: `terraform -chdir=infra/prod apply -var-file=prod.tfvars -replace=random_password.db_app`
+  (or `db_admin`), then `.\scripts\admin.ps1 -Task bootstrap` (re-sets passwords),
   then deploy.
 
 ## Operational notes
