@@ -1,4 +1,6 @@
 """Two businesses with one of everything each. A is the default business."""
+import hashlib
+import json
 import uuid
 
 from cryptography.fernet import Fernet
@@ -20,6 +22,14 @@ OWNER_A_SUB = "sub-owner-a"
 STAFF_A_SUB = "sub-staff-a"
 DISABLED_A_SUB = "sub-disabled-a"
 OWNER_B_SUB = "sub-owner-b"
+STORE_A_CODE = "STORE-001"
+STORE_B_CODE = "STORE-002"
+GATEWAY_A = uuid.UUID("00000000-0000-0000-0000-0000000000c1")
+GATEWAY_B = uuid.UUID("00000000-0000-0000-0000-0000000000c2")
+GATEWAY_A_KEY = "rtg_live_aaaa0001_secret-a"
+GATEWAY_B_KEY = "rtg_live_bbbb0001_secret-b"
+UPDATE_A = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
+UPDATE_B = uuid.UUID("00000000-0000-0000-0000-0000000000d2")
 MERCHANT_A = "MERCHANT_A"
 MERCHANT_B = "MERCHANT_B"
 LOC_A = "LOC_A"
@@ -35,6 +45,7 @@ GOLDEN_HASH_VAR_A_LOC_A2_OVERRIDE = "50849ffbc2256e0fe7db2f2ba0eb9b453bb4db82d09
 BUSINESS_TABLES = [
     "businesses", "stores", "catalog_items", "catalog_variations", "sync_cursors", "tags",
     "users", "user_stores", "square_connections", "oauth_states", "variation_location_prices",
+    "gateways", "label_updates", "label_telemetry", "access_point_status",
 ]
 
 
@@ -84,4 +95,33 @@ async def seed_two_businesses(url: str) -> None:
         ("INSERT INTO oauth_states (state, business_id, user_id, created_at) VALUES "
          "('seed-state-a', :a, :oa, now() - interval '1 hour'), "
          "('seed-state-b', :b, :ob, now())", p),
+    ])
+
+    display_a = json.dumps({"itemName": "Item A", "variationName": "Regular",
+                            "price": {"amount": "10.00", "currency": "USD"}, "sku": "SKU-A"})
+    display_b = json.dumps({"itemName": "Item B", "variationName": "Regular",
+                            "price": {"amount": "20.00", "currency": "USD"}, "sku": "SKU-B"})
+    g = {**p, "ga": GATEWAY_A, "gb": GATEWAY_B, "ua": UPDATE_A, "ub": UPDATE_B,
+         "gah": hashlib.sha256(GATEWAY_A_KEY.encode()).hexdigest(),
+         "gbh": hashlib.sha256(GATEWAY_B_KEY.encode()).hexdigest(),
+         "da": display_a, "db": display_b}
+    await run_sql(url, [
+        ("UPDATE catalog_variations SET currency = 'USD'", {}),
+        ("UPDATE stores SET code = 'STORE-001' WHERE id = :sa", g),
+        ("UPDATE stores SET code = 'STORE-002' WHERE id = :sb", g),
+        ("UPDATE tags SET version = 1", {}),
+        ("INSERT INTO gateways (id, business_id, store_id, name, key_prefix, key_hash) VALUES "
+         "(:ga, :a, :sa, 'Pi A', 'aaaa0001', :gah), (:gb, :b, :sb, 'Pi B', 'bbbb0001', :gbh)", g),
+        ("INSERT INTO label_updates (update_id, business_id, store_id, tag_id, action, version, "
+         "product_id, display, status, status_at, final_at) VALUES "
+         "(:ua, :a, :sa, :ta, 'Update', 1, 'VAR_A', CAST(:da AS jsonb), 'Succeeded', now(), now()), "
+         "(:ub, :b, :sb, :tb, 'Update', 1, 'VAR_B', CAST(:db AS jsonb), 'Succeeded', now(), now())", g),
+        ("INSERT INTO label_telemetry (business_id, store_id, tag_id, first_seen_at, last_seen_at, "
+         "battery, low_battery, raw) VALUES "
+         "(:a, :sa, :ta, now(), now(), 30, false, '{}'), (:b, :sb, :tb, now(), now(), 30, false, '{}')", g),
+        # Fixed old reported_at: a newer-only telemetry upsert must still apply later reports.
+        ("INSERT INTO access_point_status (business_id, store_id, ap_id, connected, stale, "
+         "heartbeat_interval_seconds, wait_count, send_count, reported_at) VALUES "
+         "(:a, :sa, '0CNT', true, false, 15, 0, 0, '2026-01-01T00:00:00Z'), "
+         "(:b, :sb, '1BBB', true, false, 15, 0, 0, '2026-01-01T00:00:00Z')", g),
     ])

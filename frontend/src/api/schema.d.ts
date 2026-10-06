@@ -267,10 +267,11 @@ export interface components {
             /** @description SHA-256 of the canonical projection. Used by this service to detect changes; it is never sent to the gateway. */
             content_hash: string | null;
             /** Format: date-time */
-            last_pushed_at?: string | null;
-            /** Format: date-time */
             last_confirmed_at?: string | null;
-            battery_pct?: number | null;
+            /** @description Last display version issued for this tag (0 = never sent). */
+            version?: number;
+            /** Format: uuid */
+            store_id?: string;
         };
         TagList: {
             tags: components["schemas"]["Tag"][];

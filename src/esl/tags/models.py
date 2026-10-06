@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, SmallInteger, String, TIMESTAMP, Text
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Integer, String, TIMESTAMP, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,9 +42,9 @@ class Tag(Base):
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     variation_id: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
-    last_pushed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    # Last display version issued (contract: strictly increasing per tag). 0 = never sent.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     last_confirmed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
-    battery_pct: Mapped[int | None] = mapped_column(SmallInteger)
 
     variation: Mapped[CatalogVariation | None] = relationship(
         "CatalogVariation", lazy="raise", viewonly=True

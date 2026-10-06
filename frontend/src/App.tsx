@@ -147,7 +147,7 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
   });
 
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "battery_pct", desc: false },
+    { id: "id", desc: false },
   ]);
 
   const columns = [
@@ -174,20 +174,6 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
         if (cents == null)
           return <span className="text-gray-400">Variable</span>;
         return `$${(cents / 100).toFixed(2)}`;
-      },
-    }),
-    columnHelper.accessor("battery_pct", {
-      header: "Battery",
-      cell: (info) => {
-        const pct = info.getValue();
-        if (pct == null) return <span className="text-gray-400">—</span>;
-        const color =
-          pct <= 20
-            ? "text-red-600"
-            : pct <= 50
-              ? "text-yellow-600"
-              : "text-green-600";
-        return <span className={color}>{pct}%</span>;
       },
     }),
     columnHelper.accessor("last_confirmed_at", {

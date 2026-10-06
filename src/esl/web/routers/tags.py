@@ -29,9 +29,9 @@ class TagResponse(BaseModel):
     price: int | None = None
     pricing_type: str | None = None
     content_hash: str | None = None
-    last_pushed_at: datetime | None = None
     last_confirmed_at: datetime | None = None
-    battery_pct: int | None = None
+    version: int = 0
+    store_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -60,9 +60,9 @@ def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
         id=tag.id,
         variation_id=tag.variation_id,
         content_hash=tag.content_hash,
-        last_pushed_at=tag.last_pushed_at,
         last_confirmed_at=tag.last_confirmed_at,
-        battery_pct=tag.battery_pct,
+        version=tag.version,
+        store_id=tag.store_id,
         name=proj["name"],
         variation_name=proj["variation_name"],
         sku=proj["sku"],

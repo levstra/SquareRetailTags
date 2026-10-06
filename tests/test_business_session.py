@@ -19,7 +19,7 @@ async def test_session_sees_only_its_business():
 async def test_scope_survives_commit():
     async with business_session(BUSINESS_A) as session:
         tag = await session.get(Tag, TAG_A)
-        tag.battery_pct = 50
+        tag.content_hash = "changed"
         await session.commit()
         # New transaction after commit: must still be scoped to A.
         ids = (await session.execute(select(Tag.id))).scalars().all()

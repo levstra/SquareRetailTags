@@ -501,19 +501,16 @@ components:
           description: >
             SHA-256 of the canonical projection. Used by this service to detect
             changes; it is never sent to the gateway.
-        last_pushed_at:
-          type: string
-          format: date-time
-          nullable: true
         last_confirmed_at:
           type: string
           format: date-time
           nullable: true
-        battery_pct:
+        version:
           type: integer
-          nullable: true
-          minimum: 0
-          maximum: 100
+          description: Last display version issued for this tag (0 = never sent).
+        store_id:
+          type: string
+          format: uuid
 
     TagList:
       type: object

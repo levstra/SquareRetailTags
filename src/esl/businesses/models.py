@@ -27,6 +27,7 @@ class Store(Base):
     __table_args__ = (
         UniqueConstraint("business_id", "id", name="stores_business_id_id_key"),
         UniqueConstraint("business_id", "square_location_id", name="stores_business_location_key"),
+        UniqueConstraint("code", name="stores_code_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -37,6 +38,7 @@ class Store(Base):
     )
     square_location_id: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str | None] = mapped_column(Text)  # the wire storeId, e.g. "STORE-001"
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )

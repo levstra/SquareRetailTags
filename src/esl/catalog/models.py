@@ -41,6 +41,7 @@ class CatalogVariation(Base):
     sku: Mapped[str | None] = mapped_column(Text)
     price: Mapped[int | None] = mapped_column(Integer)
     pricing_type: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str | None] = mapped_column(Text)  # ISO 4217, from Square price_money
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     present_at_all_locations: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
