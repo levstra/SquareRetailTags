@@ -2,6 +2,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import text
 
 import esl.db
+from esl.gateway.auth import get_gateway_session
 from esl.web.app import app
 from esl.web.deps import get_business_session, get_current_user
 
@@ -10,6 +11,9 @@ from esl.web.deps import get_business_session, get_current_user
 # - the OAuth callback resolves it from the single-use state row
 #   (esl_oauth_state_take). Square redirects the browser here without our token.
 UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square", "/v1/square/oauth/callback"}
+
+# The store Pi's routes: no dashboard user, authenticated by X-Api-Key (get_gateway_session).
+GATEWAY_ROUTES = {"/api/label-updates/pending", "/api/label-updates/status", "/api/labels/telemetry"}
 
 # Known scoped routes that must exist and be checked.
 REQUIRED_SCOPED_ROUTES = {
@@ -80,7 +84,7 @@ def test_every_route_uses_business_session():
     unscoped = [
         full_path
         for full_path, route_or_context in routes_with_paths
-        if full_path not in UNSCOPED_ROUTES
+        if full_path not in UNSCOPED_ROUTES and not full_path.startswith("/api/")
         and get_business_session not in set(_dependency_calls(route_or_context.dependant))
     ]
     assert unscoped == []
@@ -88,10 +92,18 @@ def test_every_route_uses_business_session():
     anonymous = [
         full_path
         for full_path, route_or_context in routes_with_paths
-        if full_path not in UNSCOPED_ROUTES
+        if full_path not in UNSCOPED_ROUTES and not full_path.startswith("/api/")
         and get_current_user not in set(_dependency_calls(route_or_context.dependant))
     ]
     assert anonymous == []
+
+    assert GATEWAY_ROUTES <= collected_paths
+    gateway_routes = [(p, r) for p, r in routes_with_paths if p.startswith("/api/")]
+    assert {p for p, _ in gateway_routes} == GATEWAY_ROUTES
+    for full_path, route_or_context in gateway_routes:
+        calls = set(_dependency_calls(route_or_context.dependant))
+        assert get_gateway_session in calls, f"{full_path} must use get_gateway_session"
+        assert get_current_user not in calls, f"{full_path} must not accept dashboard tokens"
 
 
 def test_unscoped_session_helper_is_gone():

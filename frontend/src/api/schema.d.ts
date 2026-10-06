@@ -246,6 +246,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/label-updates/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Commands for a store whose central status is Pending, oldest first */
+        get: operations["fetchPending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/label-updates/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch of status reports from the Pi
+         * @description Validate the entire batch before applying it; reject malformed reports or commands belonging to
+         *     another store without partially applying the batch. Count every valid submitted entry, including
+         *     duplicates and stale reports, in acceptedCount. Apply state only when statusAt is newer; a terminal
+         *     command must not regress to Dispatched when a delayed Accepted report arrives.
+         *     Reports are flushed on a signal or every 2 s, in batches of 100 by default (configurable up to 1000).
+         *     The durable outbox retains the entire batch on network errors, non-2xx responses, empty/malformed
+         *     acknowledgements or an acceptedCount different from the submitted count, including a larger count.
+         *     Retries back off from 5 s to at most 60 s. A lost response after commit causes the whole batch to repeat.
+         */
+        post: operations["reportStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/labels/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Label and access point telemetry snapshot from the Pi (contract 9.2)
+         * @description Sent every 60 s with the labels whose state changed, every 15 min with every label (`full: true`), and
+         *     early (at most every 5 s) when an access point connects or disconnects or a label's low-battery flag flips.
+         *     The first report after a Pi restart is full.
+         *     These are default configurable intervals. Even with no changed labels, the routine report contains
+         *     an empty labels array and current access point state, providing a liveness signal.
+         *     Failed posts do not advance the last successful report time or change cursor; subsequent snapshots
+         *     include the union of pending changes. Telemetry is not a durable event outbox.
+         *     Upsert labels per (storeId, tagId) when lastSeenAt is newer than the stored value (or the stored value
+         *     is null). A full snapshot is not a deletion list: retain labels absent from it and their last-seen times.
+         */
+        post: operations["reportTelemetry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -371,6 +443,228 @@ export interface components {
         };
         AuthorizeUrl: {
             authorize_url: string;
+        };
+        Money: {
+            /**
+             * @description Nonnegative decimal amount encoded as a string, not a JSON number.
+             * @example 219.99
+             */
+            amount: string;
+            /**
+             * @description ISO 4217 currency code.
+             * @example USD
+             */
+            currency: string;
+        };
+        /** @description Semantic data aligned with the Square catalog model; the Pi owns the layout. */
+        Display: {
+            /** @description Square item name; must contain non-whitespace text. */
+            itemName: string;
+            /** @description Square variation name as-is. Not rendered when empty, Regular (case-insensitive), or equal to itemName. */
+            variationName?: string | null;
+            price: components["schemas"]["Money"];
+            sku?: string | null;
+            /** @description Only if the integration already has it; stored */
+            category?: string | null;
+            /** @description Only if the integration already has it; stored */
+            description?: string | null;
+        };
+        /**
+         * @description Central sends semantic display data; the Pi renders images and barcodes. Update and Unassign share
+         *     a strictly increasing per-label version ladder. A version at or below the highest successfully applied
+         *     version is Superseded. Newer queued display work can supersede older queued work; claimed/in-flight
+         *     work completes before another command is sent to that label.
+         *     Locate ignores version and does not change or participate in the display version ladder. It waits
+         *     behind in-flight work for the same label; a newer Locate replaces an older queued Locate.
+         *     Schemas describe canonical commands central should emit. The Pi tolerates missing createdAt
+         *     (uses receipt time) and productId, and treats a blank/null action as Update. Invalid commands with
+         *     a parseable updateId are reported as Failed/InvalidCommand when they can be deserialized;
+         *     a missing or unparseable updateId cannot be correlated and is skipped.
+         * @example {
+         *       "updateId": "7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "version": 42,
+         *       "productId": "SQ-VARIATION-8H2K",
+         *       "createdAt": "2026-09-05T14:03:00Z",
+         *       "display": {
+         *         "itemName": "2024 Topps Chrome Baseball",
+         *         "variationName": "Hobby Box",
+         *         "price": {
+         *           "amount": "219.99",
+         *           "currency": "USD"
+         *         },
+         *         "sku": "TC24-HBY"
+         *       }
+         *     }
+         * @example {
+         *       "updateId": "0d7f4c3e-5f1a-4c8b-9b7e-2a6d8e1f3c44",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "version": 44,
+         *       "createdAt": "2026-09-06T09:00:00Z",
+         *       "action": "Unassign"
+         *     }
+         * @example {
+         *       "updateId": "3c1f6a2e-7d0b-4e9a-8b1c-5f2d9e7a1b44",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "action": "Locate",
+         *       "seconds": 30,
+         *       "createdAt": "2026-09-06T14:03:00Z"
+         *     }
+         */
+        LabelUpdateCommand: {
+            /**
+             * Format: uuid
+             * @description Idempotency key; never reused for different content.
+             */
+            updateId: string;
+            /** @description Must equal the Pi's configured store; anything else is rejected as `InvalidCommand`. */
+            storeId: string;
+            /** @description The physical label. */
+            tagId: string;
+            /**
+             * @description `Update` paints the product template; `Unassign` paints the barcode screen; `Locate` flashes the LED.
+             * @default Update
+             * @enum {string}
+             */
+            action: "Update" | "Unassign" | "Locate";
+            /**
+             * Format: int64
+             * @description Strictly increasing per tagId; required for Update and Unassign, ignored for Locate.
+             */
+            version?: number | null;
+            /** @description Square catalog object id of the variation */
+            productId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Required for Update; omitted or null for Unassign and Locate (ignored by the Pi). */
+            display?: components["schemas"]["Display"] | null;
+            /** @description Locate only. Flash duration in seconds; Pi default 30, capped at its configured maximum (default 300). Does not change the displayed image. */
+            seconds?: number | null;
+        } & (unknown & unknown);
+        Diagnostics: {
+            /** @description dBm; -256 means the label did not answer. */
+            rfPower: number;
+            /** @description Raw vendor battery byte; unit is unconfirmed (likely tenths of a volt). Not a percentage; 0 means no data. */
+            battery: number;
+            temperature: number;
+            statusByte: number;
+            lowBattery: boolean;
+        };
+        /**
+         * @example {
+         *       "updateId": "7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21",
+         *       "tagId": "840001282A7E",
+         *       "version": 42,
+         *       "action": "Update",
+         *       "status": "Succeeded",
+         *       "statusAt": "2026-09-05T14:03:41Z",
+         *       "attempt": 2,
+         *       "apId": "0CNT",
+         *       "failureCode": null,
+         *       "failureMessage": null,
+         *       "retryable": null,
+         *       "diagnostics": {
+         *         "rfPower": -58,
+         *         "battery": 30,
+         *         "temperature": 22,
+         *         "statusByte": 129,
+         *         "lowBattery": false
+         *       }
+         *     }
+         */
+        LabelUpdateStatusReport: {
+            /** Format: uuid */
+            updateId: string;
+            tagId: string;
+            /**
+             * Format: int64
+             * @description null for Locate.
+             */
+            version?: number | null;
+            /** @enum {string} */
+            action: "Update" | "Unassign" | "Locate";
+            /**
+             * @description Only Accepted and terminal states cross the wire. Accepted means durably stored, not delivered;
+             *     Queued, Dispatching and SentToAp are local states mapped to Accepted on duplicate reports.
+             *     Succeeded confirms the display update for Update/Unassign, or the LED command for Locate.
+             *     Failed and Superseded are terminal; Superseded is not an error. Immediate terminal outcomes
+             *     may arrive without an earlier Accepted report.
+             * @enum {string}
+             */
+            status: "Accepted" | "Succeeded" | "Failed" | "Superseded";
+            /** Format: date-time */
+            statusAt: string;
+            /** @description Attempt counter; may be zero before hardware execution. */
+            attempt: number;
+            apId?: string | null;
+            /** @enum {string|null} */
+            failureCode?: "LabelNoResponse" | "ApUnavailable" | "ApTimeout" | "ApQueueFull" | "LabelRejectedKey" | "LabelHardwareError" | "RenderError" | "InvalidCommand" | "InternalError" | null;
+            /** @description Failure details or supersession reason; null otherwise. */
+            failureMessage?: string | null;
+            /**
+             * @description Null for non-failures. True for LabelNoResponse, ApUnavailable, ApTimeout and ApQueueFull;
+             *     false for LabelRejectedKey, LabelHardwareError, RenderError, InvalidCommand and InternalError.
+             *     Central owns business retries: issue a new updateId and, for display actions, a newer version.
+             *     Re-pending the same terminal ID only retrieves its stored outcome.
+             */
+            retryable?: boolean | null;
+            diagnostics?: components["schemas"]["Diagnostics"] | null;
+        };
+        LabelTelemetry: {
+            tagId: string;
+            /** Format: date-time */
+            firstSeenAt: string;
+            /** Format: date-time */
+            lastSeenAt?: string | null;
+            lastSeenApId?: string | null;
+            /** @description dBm of the last sighting. */
+            rfPower?: number | null;
+            /** @description Raw vendor byte, not a percentage; unit unconfirmed (likely tenths of a volt). A fresh cell has been observed at about 31. */
+            battery?: number | null;
+            /** @description The Pi's judgement with its configured threshold (25). */
+            lowBattery: boolean;
+            temperature?: number | null;
+            statusByte?: number | null;
+            firmwareVersion?: number | null;
+            type?: number | null;
+            size?: number | null;
+            color?: number | null;
+            factory?: number | null;
+            lastSuccessApId?: string | null;
+            /** Format: date-time */
+            lastSuccessAt?: string | null;
+            /** Format: date-time */
+            lastResultAt?: string | null;
+            lastResultSuccess?: boolean | null;
+        };
+        AccessPointTelemetry: {
+            apId: string;
+            connected: boolean;
+            /** @description Connected but no heartbeat within the configured threshold (default three intervals); treat prolonged staleness as offline. */
+            stale: boolean;
+            /** Format: date-time */
+            connectedAt?: string | null;
+            /** Format: date-time */
+            disconnectedAt?: string | null;
+            /** Format: date-time */
+            lastHeartbeatAt?: string | null;
+            heartbeatIntervalSeconds: number;
+            apVersion?: string | null;
+            ip?: string | null;
+            waitCount: number;
+            sendCount: number;
+        };
+        TelemetryReport: {
+            storeId: string;
+            /** Format: date-time */
+            reportedAt: string;
+            /** @description true when `labels` holds every label the Pi knows. */
+            full: boolean;
+            labels: components["schemas"]["LabelTelemetry"][];
+            accessPoints: components["schemas"]["AccessPointTelemetry"][];
         };
     };
     responses: {
@@ -899,6 +1193,149 @@ export interface operations {
                 };
             };
             502: components["responses"]["SquareUnavailable"];
+        };
+    };
+    fetchPending: {
+        parameters: {
+            query: {
+                storeId: string;
+                limit?: number;
+                /**
+                 * @description Long polling. Hold the request until at least one Pending command exists for the store, then answer at
+                 *     once; answer an empty page at the deadline. The Pi sends 25. A server that ignores this parameter still
+                 *     works: the Pi falls back to polling every 5 s.
+                 */
+                wait?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of commands. The Pi drains further pages when hasMore is true, allowing Accepted reports to settle between pages (default 1 s). Return an empty updates array and hasMore false when no work exists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updates: components["schemas"]["LabelUpdateCommand"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reportStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    storeId: string;
+                    reports: components["schemas"]["LabelUpdateStatusReport"][];
+                };
+            };
+        };
+        responses: {
+            /** @description All reports acknowledged, including valid duplicates and stale entries. acceptedCount must equal the submitted batch size. Non-2xx, malformed or mismatched acknowledgements retain the whole batch for retry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        acceptedCount: number;
+                    };
+                };
+            };
+            /** @description Malformed or foreign command report; the entire batch is rejected without partial application. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reportTelemetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryReport"];
+            };
+        };
+        responses: {
+            /** @description Accepted. Unlike status reports, telemetry accepts any successful 2xx response, including an empty body; acceptedCount is informational. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        acceptedCount?: number;
+                    };
+                };
+            };
+            /** @description Telemetry accepted without a response body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

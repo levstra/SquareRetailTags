@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from esl import db
 from esl.config import settings
 from esl.jobs import registry, scheduler
-from esl.web.routers import account, catalog, health, square, staff, tags, webhooks
+from esl.web.routers import account, catalog, gateway_api, health, square, staff, tags, webhooks
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
     app.include_router(staff.router, prefix="/v1")
     app.include_router(square.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
+    app.include_router(gateway_api.router)
     return app
 
 
