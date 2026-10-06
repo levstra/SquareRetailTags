@@ -269,9 +269,9 @@ changes), and once after migrating an existing database to `0006`.
 - Any change to `infra/prod/nat-user-data.sh` replaces the NAT instance: a few
   minutes with no outbound traffic for App Runner and tasks. Apply outside
   business hours.
-- The ECR lifecycle keeps the 30 most recent images, and never expires the
-  images tagged `:prod` or `:candidate` (a rule at priority 1); rollback
-  targets older than that are gone.
+- The ECR lifecycle keeps the 30 most recent images plus whatever `:prod` and `:candidate`
+  currently point at (one never-expire rule per tag, priorities 1 and 2); older rollback
+  targets beyond those are gone.
 - If the migrate step in CI times out (~10 min), the Fargate task may still be
   running: check it with `aws ecs list-tasks --cluster esl-prod --family esl-prod-migrate`
   before re-running.
