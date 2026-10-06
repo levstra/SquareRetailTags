@@ -39,10 +39,14 @@ async def run_command_reconcile() -> None:
             text("select * from esl_businesses_with_open_commands()")
         )).scalars().all()
     for business_id in business_ids:
-        async with business_session(business_id) as session:
-            count = await reconcile_commands(session)
+        # One failing business must not starve the rest (as refresh_expiring_tokens).
+        try:
+            async with business_session(business_id) as session:
+                count = await reconcile_commands(session)
             if count:
                 logger.warning("Re-pended %d stuck command(s) for business %s", count, business_id)
+        except Exception:
+            logger.exception("command reconcile failed for business %s", business_id)
 
 
 RECONCILE_JOB = Job(name="label-command-reconcile", interval_seconds=300, run=run_command_reconcile)

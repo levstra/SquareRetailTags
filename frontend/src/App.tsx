@@ -198,6 +198,9 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
           return <span className="text-yellow-600">Sending…</span>;
         if (tag.pricing_type === "VARIABLE_PRICING")
           return <span className="text-yellow-600">Variable price — shows unassigned</span>;
+        // A Succeeded Unassign means the tag was blanked, not that it shows a price.
+        if (u?.status === "Succeeded" && u.action === "Unassign")
+          return <span className="text-gray-500">Unassigned</span>;
         if (u?.status === "Succeeded") return <span className="text-green-600">On shelf</span>;
         return <span className="text-gray-400">—</span>;
       },

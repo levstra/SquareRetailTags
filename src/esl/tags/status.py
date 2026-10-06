@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.gateway.models import DISPLAY_ACTIONS, LabelTelemetry, LabelUpdate
@@ -23,7 +24,7 @@ async def load_tag_extras(session: AsyncSession, tags: list[Tag]) -> dict[str, T
             select(LabelUpdate)
             .where(LabelUpdate.tag_id.in_(ids), LabelUpdate.action.in_(DISPLAY_ACTIONS))
             .order_by(LabelUpdate.tag_id, LabelUpdate.version.desc())
-            .distinct(LabelUpdate.tag_id)
+            .ext(distinct_on(LabelUpdate.tag_id))
         )).scalars()
     }
     telemetry = {

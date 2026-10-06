@@ -1,8 +1,9 @@
 import pytest
+from sqlalchemy import text
 
 from tests.auth import bearer
 from tests.seed import (
-    OWNER_B_SUB, STAFF_A_SUB, STORE_A, STORE_A2, STORE_B, TAG_A, UPDATE_A, UPDATE_B,
+    BUSINESS_A, OWNER_B_SUB, STAFF_A_SUB, STORE_A, STORE_A2, STORE_B, TAG_A, UPDATE_A, UPDATE_B,
 )
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
@@ -32,6 +33,21 @@ async def test_store_label_inventory(client):
     assert (await client.get(f"/v1/stores/{STORE_B}/labels")).status_code == 404
     assert (await client.get(f"/v1/stores/{STORE_A}/labels", headers=bearer(STAFF_A_SUB))).status_code == 403
     assert (await client.get(f"/v1/stores/{STORE_A2}/labels", headers=bearer(STAFF_A_SUB))).json() == {"labels": []}
+
+
+async def test_label_heard_in_one_store_but_paired_in_another_is_not_assigned_there(client, admin_session):
+    # A2A2A2A2A2A2 is paired at STORE_A2, but STORE_A's Pi hears it (e.g. a tag carried over).
+    await admin_session.execute(text(
+        "insert into tags (id, business_id, store_id, variation_id) values ('A2A2A2A2A2A2', :b, :s, 'VAR_A')"
+    ), {"b": BUSINESS_A, "s": STORE_A2})
+    await admin_session.execute(text(
+        "insert into label_telemetry (business_id, store_id, tag_id, last_seen_at, raw) "
+        "values (:b, :s, 'A2A2A2A2A2A2', now(), '{}')"
+    ), {"b": BUSINESS_A, "s": STORE_A})
+    await admin_session.commit()
+    labels = {label["tag_id"]: label for label in (await client.get(f"/v1/stores/{STORE_A}/labels")).json()["labels"]}
+    assert (labels["A2A2A2A2A2A2"]["assigned"], labels["A2A2A2A2A2A2"]["variation_id"]) == (False, None)
+    assert labels[TAG_A]["assigned"] is True
 
 
 async def test_store_gateways_are_owner_only(client):

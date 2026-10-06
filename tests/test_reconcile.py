@@ -5,10 +5,11 @@ import pytest
 from sqlalchemy import text
 
 from esl.db import business_session
-from esl.gateway.reconcile import RECONCILE_JOB, reconcile_commands
+from esl.gateway import reconcile
+from esl.gateway.reconcile import RECONCILE_JOB, reconcile_commands, run_command_reconcile
 from esl.jobs.registry import JOBS
 from tests.gateway_helpers import command_row, insert_command
-from tests.seed import BUSINESS_A
+from tests.seed import BUSINESS_A, BUSINESS_B, STORE_B
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
@@ -42,3 +43,24 @@ async def test_repeated_repends_are_logged(caplog, admin_session):
 def test_job_is_registered():
     assert RECONCILE_JOB in JOBS
     assert (RECONCILE_JOB.name, RECONCILE_JOB.interval_seconds) == ("label-command-reconcile", 300)
+
+
+async def test_one_failing_business_does_not_starve_the_rest(monkeypatch, caplog):
+    old = datetime.now(timezone.utc) - timedelta(hours=1)
+    a, b = uuid.uuid4(), uuid.uuid4()
+    await insert_command(update_id=a, tag_id="AAAAAAAAAAB4", version=1, status="Dispatched", dispatched_at=old)
+    await insert_command(update_id=b, tag_id="BBBBBBBBBBB4", version=1, status="Dispatched", dispatched_at=old,
+                         business_id=BUSINESS_B, store_id=STORE_B)
+
+    async def failing_for_a(session, **kwargs):
+        business = (await session.execute(text("select current_setting('app.business_id')"))).scalar_one()
+        if business == str(BUSINESS_A):
+            raise RuntimeError("boom")
+        return await reconcile_commands(session, **kwargs)
+
+    monkeypatch.setattr(reconcile, "reconcile_commands", failing_for_a)
+    await run_command_reconcile()
+
+    assert (await command_row(a)).status == "Dispatched"
+    assert (await command_row(b)).status == "Pending"
+    assert "command reconcile failed for business" in caplog.text

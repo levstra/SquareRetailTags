@@ -67,7 +67,9 @@ async def list_store_labels(
     await _store(session, user, store_id)
     rows = (await session.execute(
         select(LabelTelemetry, Tag.variation_id)
-        .outerjoin(Tag, and_(Tag.id == LabelTelemetry.tag_id, Tag.business_id == LabelTelemetry.business_id))
+        # Store too: a tag paired in another store of this business isn't assigned here.
+        .outerjoin(Tag, and_(Tag.id == LabelTelemetry.tag_id, Tag.business_id == LabelTelemetry.business_id,
+                             Tag.store_id == LabelTelemetry.store_id))
         .where(LabelTelemetry.store_id == store_id)
         .order_by(LabelTelemetry.tag_id)
     )).all()
