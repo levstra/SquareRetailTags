@@ -34,8 +34,9 @@ Call the API through the typed client in `src/api/client.ts`
 
 - Function components with hooks. No class components.
 - Server state lives in TanStack Query, not `useState` or context.
-- The tag table is the primary surface. Default sort is battery ascending —
-  the recurring operational task is "which tags need batteries."
+- The tag table is the primary surface. Default sort is "needs attention"
+  (failed command, low battery, not heard from, still sending) — the
+  recurring operational task is "which tags need a person."
 - Money arrives as integer cents. Format at the render boundary only.
 - Dev requests go through the Vite proxy (`/v1` → localhost:8000).
   Never hardcode an absolute backend URL; production is same-origin.

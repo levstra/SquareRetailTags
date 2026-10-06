@@ -147,8 +147,18 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
   });
 
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "id", desc: false },
+    { id: "attention", desc: true },
   ]);
+
+  // Higher = needs attention sooner: failed command, low battery, not heard from, still sending.
+  function attention(tag: Tag): number {
+    let score = 0;
+    if (tag.latest_update?.status === "Failed") score += 8;
+    if (tag.low_battery) score += 4;
+    if (tag.last_seen_at == null || Date.now() - new Date(tag.last_seen_at).getTime() > 6 * 3600_000) score += 2;
+    if (tag.latest_update && ["Pending", "Dispatched"].includes(tag.latest_update.status)) score += 1;
+    return score;
+  }
 
   const columns = [
     columnHelper.accessor("id", {
@@ -174,6 +184,37 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
         if (cents == null)
           return <span className="text-gray-400">Variable</span>;
         return `$${(cents / 100).toFixed(2)}`;
+      },
+    }),
+    columnHelper.accessor((t) => attention(t), {
+      id: "attention",
+      header: "Status",
+      cell: (info) => {
+        const tag = info.row.original;
+        const u = tag.latest_update;
+        if (u?.status === "Failed")
+          return <span className="text-red-600">Failed{u.failure_code ? ` (${u.failure_code})` : ""}</span>;
+        if (u && (u.status === "Pending" || u.status === "Dispatched"))
+          return <span className="text-yellow-600">Sending…</span>;
+        if (tag.pricing_type === "VARIABLE_PRICING")
+          return <span className="text-yellow-600">Variable price — shows unassigned</span>;
+        if (u?.status === "Succeeded") return <span className="text-green-600">On shelf</span>;
+        return <span className="text-gray-400">—</span>;
+      },
+    }),
+    columnHelper.accessor("low_battery", {
+      header: "Battery",
+      cell: (info) => {
+        const low = info.getValue();
+        if (low == null) return <span className="text-gray-400">—</span>;
+        return low ? <span className="text-red-600">Low</span> : <span className="text-green-600">OK</span>;
+      },
+    }),
+    columnHelper.accessor("last_seen_at", {
+      header: "Last seen",
+      cell: (info) => {
+        const v = info.getValue();
+        return v ? new Date(v).toLocaleString() : <span className="text-gray-400">Never</span>;
       },
     }),
     columnHelper.accessor("last_confirmed_at", {

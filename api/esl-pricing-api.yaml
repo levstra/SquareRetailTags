@@ -152,6 +152,75 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /label-updates/{update_id}:
+    parameters:
+      - { name: update_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getLabelUpdate
+      summary: Status of one label command (the pairing card polls this)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Command status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LabelUpdateSummary" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stores/{store_id}/labels:
+    parameters:
+      - { name: store_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listStoreLabels
+      summary: Every tag the store's Pi has heard, with assignment and battery state
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Tag inventory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoreLabelList" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stores/{store_id}/gateways:
+    parameters:
+      - { name: store_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listStoreGateways
+      summary: The store's gateway keys and access points (owners only, read-only)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Gateways and access points
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoreGateways" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /me:
     get:
       operationId: getMe
@@ -652,6 +721,92 @@ components:
         store_id:
           type: string
           format: uuid
+        latest_update:
+          oneOf:
+            - $ref: "#/components/schemas/LabelUpdateSummary"
+            - type: "null"
+        low_battery:
+          type: [boolean, "null"]
+          description: From the store Pi's telemetry; null if the Pi has never reported this tag.
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
+
+    LabelUpdateSummary:
+      type: object
+      required: [update_id, action, status]
+      properties:
+        update_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [Update, Unassign, Locate]
+        status:
+          type: string
+          enum: [Pending, Dispatched, Succeeded, Failed, Superseded]
+        failure_code:
+          type: [string, "null"]
+        retryable:
+          type: [boolean, "null"]
+        status_at:
+          type: [string, "null"]
+          format: date-time
+
+    StoreLabel:
+      type: object
+      required: [tag_id, low_battery, assigned]
+      properties:
+        tag_id:
+          $ref: "#/components/schemas/TagId"
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
+        low_battery:
+          type: boolean
+        battery:
+          type: [integer, "null"]
+          description: Raw vendor byte, not a percentage.
+        assigned:
+          type: boolean
+        variation_id:
+          type: [string, "null"]
+
+    StoreLabelList:
+      type: object
+      required: [labels]
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreLabel"
+
+    StoreGateways:
+      type: object
+      required: [gateways, access_points]
+      properties:
+        gateways:
+          type: array
+          items:
+            type: object
+            required: [id, name, key_prefix, revoked]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              key_prefix: { type: string }
+              last_seen_at: { type: [string, "null"], format: date-time }
+              revoked: { type: boolean }
+        access_points:
+          type: array
+          items:
+            type: object
+            required: [ap_id, connected, stale, reported_at]
+            properties:
+              ap_id: { type: string }
+              connected: { type: boolean }
+              stale: { type: boolean }
+              last_heartbeat_at: { type: [string, "null"], format: date-time }
+              reported_at: { type: string, format: date-time }
 
     TagList:
       type: object

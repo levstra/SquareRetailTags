@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from esl.catalog.sync import sync_business
 from esl.db import business_session
+from esl.gateway.reconcile import RECONCILE_JOB
 from esl.jobs.scheduler import Job
 from esl.square import connections
 
@@ -31,4 +32,5 @@ async def refresh_expiring_tokens() -> None:
 JOBS: list[Job] = [
     Job("square-reconcile-sync", 900, reconcile_all_syncs),
     Job("square-token-refresh", 86400, refresh_expiring_tokens),
+    RECONCILE_JOB,
 ]

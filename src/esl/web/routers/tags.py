@@ -15,7 +15,9 @@ from esl.catalog.models import CatalogVariation
 from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
 from esl.tags.projection import Projection
+from esl.tags.status import TagExtras, load_tag_extras
 from esl.web.deps import get_business_session, get_current_user, get_request_business_id
+from esl.web.routers.label_updates import LabelUpdateSummary, summarize
 
 router = APIRouter()
 
@@ -32,6 +34,9 @@ class TagResponse(BaseModel):
     last_confirmed_at: datetime | None = None
     version: int = 0
     store_id: uuid.UUID | None = None
+    latest_update: LabelUpdateSummary | None = None
+    low_battery: bool | None = None
+    last_seen_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -71,6 +76,16 @@ def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
     )
 
 
+def _with_extras(response: TagResponse, extras: TagExtras | None) -> TagResponse:
+    if extras is None:
+        return response
+    return response.model_copy(update={
+        "latest_update": summarize(extras.latest_update) if extras.latest_update else None,
+        "low_battery": extras.telemetry.low_battery if extras.telemetry else None,
+        "last_seen_at": extras.telemetry.last_seen_at if extras.telemetry else None,
+    })
+
+
 def _ensure_store_allowed(user: CurrentUser, store_id: uuid.UUID) -> None:
     if not user.can_use_store(store_id):
         raise HTTPException(status_code=403, detail="You don't have access to this store")
@@ -93,7 +108,10 @@ async def list_tags(
         query = query.where(Tag.store_id.in_(user.store_ids))
     tags = (await session.execute(query)).scalars().all()
     projections = await projections_for(session, tags)
-    return TagListResponse(tags=[_tag_to_response(t, projections[t.id]) for t in tags])
+    extras = await load_tag_extras(session, tags)
+    return TagListResponse(
+        tags=[_with_extras(_tag_to_response(t, projections[t.id]), extras.get(t.id)) for t in tags]
+    )
 
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)
@@ -108,7 +126,8 @@ async def get_tag(
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
     _ensure_store_allowed(user, tag.store_id)
     projections = await projections_for(session, [tag])
-    return _tag_to_response(tag, projections[tag.id])
+    extras = (await load_tag_extras(session, [tag])).get(tag.id)
+    return _with_extras(_tag_to_response(tag, projections[tag.id]), extras)
 
 
 async def _default_store_id(session: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
@@ -170,4 +189,5 @@ async def assign_tag(
 
     tag = await session.get(Tag, tag_id, populate_existing=True)
     projections = await projections_for(session, [tag])
-    return _tag_to_response(tag, projections[tag.id])
+    extras = (await load_tag_extras(session, [tag])).get(tag.id)
+    return _with_extras(_tag_to_response(tag, projections[tag.id]), extras)

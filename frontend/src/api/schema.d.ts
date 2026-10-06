@@ -81,6 +81,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/label-updates/{update_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                update_id: string;
+            };
+            cookie?: never;
+        };
+        /** Status of one label command (the pairing card polls this) */
+        get: operations["getLabelUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores/{store_id}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        /** Every tag the store's Pi has heard, with assignment and battery state */
+        get: operations["listStoreLabels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores/{store_id}/gateways": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        /** The store's gateway keys and access points (owners only, read-only) */
+        get: operations["listStoreGateways"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -344,6 +401,56 @@ export interface components {
             version?: number;
             /** Format: uuid */
             store_id?: string;
+            latest_update?: components["schemas"]["LabelUpdateSummary"] | null;
+            /** @description From the store Pi's telemetry; null if the Pi has never reported this tag. */
+            low_battery?: boolean | null;
+            /** Format: date-time */
+            last_seen_at?: string | null;
+        };
+        LabelUpdateSummary: {
+            /** Format: uuid */
+            update_id: string;
+            /** @enum {string} */
+            action: "Update" | "Unassign" | "Locate";
+            /** @enum {string} */
+            status: "Pending" | "Dispatched" | "Succeeded" | "Failed" | "Superseded";
+            failure_code?: string | null;
+            retryable?: boolean | null;
+            /** Format: date-time */
+            status_at?: string | null;
+        };
+        StoreLabel: {
+            tag_id: components["schemas"]["TagId"];
+            /** Format: date-time */
+            last_seen_at?: string | null;
+            low_battery: boolean;
+            /** @description Raw vendor byte, not a percentage. */
+            battery?: number | null;
+            assigned: boolean;
+            variation_id?: string | null;
+        };
+        StoreLabelList: {
+            labels: components["schemas"]["StoreLabel"][];
+        };
+        StoreGateways: {
+            gateways: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                key_prefix: string;
+                /** Format: date-time */
+                last_seen_at?: string | null;
+                revoked: boolean;
+            }[];
+            access_points: {
+                ap_id: string;
+                connected: boolean;
+                stale: boolean;
+                /** Format: date-time */
+                last_heartbeat_at?: string | null;
+                /** Format: date-time */
+                reported_at: string;
+            }[];
         };
         TagList: {
             tags: components["schemas"]["Tag"][];
@@ -855,6 +962,105 @@ export interface operations {
             };
             /** @description The tag ID is not 12 hexadecimal characters */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getLabelUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                update_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Command status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelUpdateSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStoreLabels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tag inventory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreLabelList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStoreGateways: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gateways and access points */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreGateways"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
