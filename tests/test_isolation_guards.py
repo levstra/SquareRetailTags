@@ -10,7 +10,7 @@ from esl.web.deps import get_business_session, get_current_user
 # - the Square webhook resolves it from the signed event's merchant_id;
 # - the OAuth callback resolves it from the single-use state row
 #   (esl_oauth_state_take). Square redirects the browser here without our token.
-UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square", "/v1/square/oauth/callback"}
+UNSCOPED_ROUTES = {"/v1/health", "/v1/webhooks/square", "/v1/square/oauth/callback", "/{path:path}"}
 
 # The store Pi's routes: no dashboard user, authenticated by X-Api-Key (get_gateway_session).
 GATEWAY_ROUTES = {"/api/label-updates/pending", "/api/label-updates/status", "/api/labels/telemetry"}

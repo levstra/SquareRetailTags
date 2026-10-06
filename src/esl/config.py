@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     cognito_region: str = ""
     cognito_user_pool_id: str = ""
     cognito_app_client_id: str = ""
+    # Built frontend to serve (production image: /app/frontend/dist). Empty = API only.
+    frontend_dist: str = ""
 
 
 settings = Settings()

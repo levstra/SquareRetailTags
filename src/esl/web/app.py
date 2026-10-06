@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from esl import db
 from esl.config import settings
 from esl.jobs import registry, scheduler
+from esl.web.frontend import mount_frontend
 from esl.web.routers import (
     account, catalog, gateway_api, health, label_updates, square, staff, store_status, tags, webhooks,
 )
@@ -22,7 +23,7 @@ async def lifespan(_app: FastAPI):
         await db.engine.dispose()
 
 
-def create_app() -> FastAPI:
+def create_app(frontend_dist: str | None = None) -> FastAPI:
     app = FastAPI(title="ESL Pricing Service", lifespan=lifespan)
     app.include_router(health.router, prefix="/v1")
     app.include_router(catalog.router, prefix="/v1")
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(label_updates.router, prefix="/v1")
     app.include_router(store_status.router, prefix="/v1")
     app.include_router(gateway_api.router)
+    mount_frontend(app, settings.frontend_dist if frontend_dist is None else frontend_dist)
     return app
 
 
