@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.catalog.models import CatalogItem, CatalogVariation, SyncCursor, VariationLocationPrice
 from esl.db import business_session
+from esl.observability import log_sync_failure
 from esl.square import connections
 from esl.tags.desired import apply_desired_state
 from esl.tags.models import Tag
@@ -38,8 +39,8 @@ async def sync_business(business_id: uuid.UUID) -> dict | None:
                 await session.commit()
                 logger.warning("Square rejected the token for business %s: needs reconnect", business_id)
                 return None
-    except Exception:
-        logger.exception("Square sync failed for business %s", business_id)
+    except Exception as exc:
+        log_sync_failure(business_id, exc)
         return None
     logger.info("Square sync complete for business %s: %s", business_id, result)
     return result
