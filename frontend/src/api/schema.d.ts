@@ -550,7 +550,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The tag can't be used by this business (for example, it is registered elsewhere). Deliberately does not say why. */
+            /** @description The tag can't be used by this business, or the variation has no price to show at this store (VARIABLE_PRICING). The detail says which; it never reveals who owns a tag. */
             409: {
                 headers: {
                     [name: string]: unknown;

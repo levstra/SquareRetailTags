@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
-from esl.tags.desired import apply_desired_state, projections_for
+from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
 from esl.tags.projection import Projection
 from esl.web.deps import get_business_session, get_current_user, get_request_business_id
@@ -154,7 +154,13 @@ async def assign_tag(
 
     try:
         # apply_desired_state queries (autoflush), so a foreign tag ID can
-        # surface here as well as at commit.
+        # surface here as well as at commit. The variable-price check queries
+        # too, so it must sit inside this guard to keep the 409 for foreign tags.
+        if body.variation_id is not None:
+            # The contract needs a price; a VARIABLE_PRICING item (at this store) can't be shown.
+            if (await desired_projection(session, tag))["price"] is None:
+                await session.rollback()
+                raise HTTPException(status_code=409, detail="Variable-priced items can't be shown on a label")
         await apply_desired_state(session, tag)
         await session.commit()
     except IntegrityError:

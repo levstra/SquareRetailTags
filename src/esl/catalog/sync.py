@@ -118,6 +118,11 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
             vd = var.item_variation_data
             pricing_type = (vd.pricing_type or "FIXED_PRICING").upper()
             price = vd.price_money.amount if vd.price_money is not None else None
+            currency = (
+                str(vd.price_money.currency)
+                if vd.price_money is not None and vd.price_money.currency
+                else None
+            )
             var_updated_at = _parse_dt(var.updated_at)
 
             presence = {
@@ -136,6 +141,7 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
                     variation_name=vd.name or "",
                     sku=vd.sku or None,
                     price=price,
+                    currency=currency,
                     pricing_type=pricing_type,
                     updated_at=var_updated_at,
                     **presence,
@@ -147,6 +153,7 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
                         "variation_name": vd.name or "",
                         "sku": vd.sku or None,
                         "price": price,
+                        "currency": currency,
                         "pricing_type": pricing_type,
                         "updated_at": var_updated_at,
                         **presence,

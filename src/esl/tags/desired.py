@@ -1,7 +1,7 @@
 """The single place that decides what a tag should show.
 
-Nothing else may assign Tag.content_hash. Step 4 enqueues gateway commands
-from apply_desired_state when the hash changes.
+Nothing else may assign Tag.content_hash. apply_desired_state enqueues the
+gateway command when the hash changes.
 """
 from collections.abc import Sequence
 
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation, VariationLocationPrice
+from esl.gateway.commands import enqueue_for_tag, variation_currency
 from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import UNASSIGNED, Projection, build_projection
@@ -61,9 +62,15 @@ async def desired_projection(session: AsyncSession, tag: Tag) -> Projection:
 
 
 async def apply_desired_state(session: AsyncSession, tag: Tag) -> bool:
-    """Recompute tag.content_hash. Returns True if it changed. Does not commit."""
-    new_hash = hash_projection(await desired_projection(session, tag))
+    """Recompute tag.content_hash; when it changes, issue exactly one command. Does not commit.
+
+    Same weight as projection.py/hashing.py: this decides whether a tag is rewritten.
+    An unchanged hash enqueues nothing.
+    """
+    projection = await desired_projection(session, tag)
+    new_hash = hash_projection(projection)
     if new_hash == tag.content_hash:
         return False
     tag.content_hash = new_hash
+    await enqueue_for_tag(session, tag, projection, await variation_currency(session, tag))
     return True
