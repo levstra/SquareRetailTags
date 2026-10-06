@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from esl.db import business_session
-from esl.gateway.auth import GatewayContext, get_gateway, require_store, touch_gateway
+from esl.gateway.auth import GatewayContext, authorize_store, get_gateway, require_store
 from esl.gateway.keys import generate_key, hash_key, key_matches, parse_prefix
 from tests.seed import BUSINESS_A, GATEWAY_A, GATEWAY_A_KEY, STORE_A
 
@@ -61,15 +61,16 @@ async def _last_seen(admin_session):
         text("select last_seen_at from gateways where id = :g"), {"g": GATEWAY_A})).scalar_one()
 
 
-async def test_last_seen_only_moves_after_the_store_check(admin_session):
-    """R6: a 403 (wrong storeId) must not mark the Pi as seen; touch_gateway does, after the check."""
+async def test_authorize_store_touches_last_seen_only_on_success(admin_session):
     ctx = await get_gateway(GATEWAY_A_KEY)
-    before = await _last_seen(admin_session)
-    with pytest.raises(HTTPException):
-        require_store(ctx, "STORE-002")  # handlers call touch_gateway only after this passes
-    assert await _last_seen(admin_session) == before
+    assert await _last_seen(admin_session) is None
     async with business_session(BUSINESS_A) as session:
-        await touch_gateway(session, ctx)
+        with pytest.raises(HTTPException) as exc:
+            await authorize_store(session, ctx, "STORE-002")
+    assert exc.value.status_code == 403
+    await admin_session.rollback()
+    assert await _last_seen(admin_session) is None
+    async with business_session(BUSINESS_A) as session:
+        await authorize_store(session, ctx, "store-001")
     await admin_session.rollback()  # end the snapshot so the next read sees the commit
-    after = await _last_seen(admin_session)
-    assert after is not None and (before is None or after > before)
+    assert await _last_seen(admin_session) is not None

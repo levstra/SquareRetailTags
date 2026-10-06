@@ -21,38 +21,43 @@ async def projections_for(session: AsyncSession, tags: Sequence[Tag]) -> dict[st
     """Desired projection per tag id, in at most four queries regardless of tag count:
     variations, their items (selectinload), location overrides, store locations."""
     variation_ids = {t.variation_id for t in tags if t.variation_id is not None}
+    business_ids = {t.business_id for t in tags}
     store_ids = {t.store_id for t in tags}
 
-    variations: dict[str, CatalogVariation] = {}
-    overrides: dict[tuple[str, str], VariationLocationPrice] = {}
+    # Every read filters by business_id explicitly and is keyed by it: the CLI runs as the
+    # admin login (no RLS) and Square IDs are only unique within a business.
+    variations: dict[tuple, CatalogVariation] = {}
+    overrides: dict[tuple, VariationLocationPrice] = {}
     if variation_ids:
         rows = (await session.execute(
             select(CatalogVariation)
-            .where(CatalogVariation.id.in_(variation_ids))
+            .where(CatalogVariation.business_id.in_(business_ids), CatalogVariation.id.in_(variation_ids))
             .options(selectinload(CatalogVariation.item))
             .execution_options(populate_existing=True)
         )).scalars().all()
-        variations = {v.id: v for v in rows}
+        variations = {(v.business_id, v.id): v for v in rows}
         override_rows = (await session.execute(
             select(VariationLocationPrice)
-            .where(VariationLocationPrice.variation_id.in_(variation_ids))
+            .where(VariationLocationPrice.business_id.in_(business_ids),
+                   VariationLocationPrice.variation_id.in_(variation_ids))
             .execution_options(populate_existing=True)
         )).scalars().all()
-        overrides = {(o.variation_id, o.square_location_id): o for o in override_rows}
+        overrides = {(o.business_id, o.variation_id, o.square_location_id): o for o in override_rows}
 
     locations: dict = {}
     if store_ids:
         locations = dict((await session.execute(
-            select(Store.id, Store.square_location_id).where(Store.id.in_(store_ids))
+            select(Store.id, Store.square_location_id)
+            .where(Store.business_id.in_(business_ids), Store.id.in_(store_ids))
         )).all())
 
     result: dict[str, Projection] = {}
     for tag in tags:
-        variation = variations.get(tag.variation_id) if tag.variation_id is not None else None
+        variation = variations.get((tag.business_id, tag.variation_id)) if tag.variation_id is not None else None
         if variation is None:
             result[tag.id] = UNASSIGNED
             continue
-        override = overrides.get((variation.id, locations.get(tag.store_id)))
+        override = overrides.get((tag.business_id, variation.id, locations.get(tag.store_id)))
         result[tag.id] = build_projection(variation.item, variation, override)
     return result
 

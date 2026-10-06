@@ -50,14 +50,15 @@ def require_store(gateway: GatewayContext, store_id: object) -> None:
 async def get_gateway_session(
     gateway: GatewayContext = Depends(get_gateway),
 ) -> AsyncIterator[AsyncSession]:
-    """A session scoped to the key's business. Does NOT mark the Pi as seen: handlers call
-    touch_gateway() after require_store passes, so a wrong storeId (403) doesn't look online."""
+    """A session scoped to the key's business. Does NOT mark the Pi as seen; see authorize_store."""
     async with business_session(gateway.business_id) as session:
         yield session
 
 
-async def touch_gateway(session: AsyncSession, gateway: GatewayContext) -> None:
-    """Record a successful request (spec 4.6). Commits."""
+async def authorize_store(session: AsyncSession, gateway: GatewayContext, store_id: object) -> None:
+    """Check the request's storeId (400/403 via require_store) and only then record the Pi as
+    seen (spec 4.6), so a wrong storeId never marks it online. Commits."""
+    require_store(gateway, store_id)
     await session.execute(
         update(Gateway).where(Gateway.id == gateway.gateway_id).values(last_seen_at=func.now())
     )

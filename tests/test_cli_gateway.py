@@ -6,7 +6,7 @@ import pytest
 from esl import cli
 from tests.conftest import ADMIN_URL
 from tests.dbutil import run_sql
-from tests.seed import BUSINESS_A, GATEWAY_A, STORE_A2, TAG_A
+from tests.seed import BUSINESS_A, BUSINESS_B, GATEWAY_A, STORE_A2, TAG_A, TAG_B
 
 
 @pytest.fixture
@@ -43,3 +43,22 @@ def test_push_all_enqueues_current_state(seeded):
     rows = _sql("select action, version, status from label_updates where tag_id = :t order by version",
                 {"t": TAG_A})
     assert rows[-1] == ("Update", 2, "Pending")
+
+
+def test_push_all_leaves_other_businesses_alone(seeded):
+    assert cli.main(["admin", "push-all", "--business", str(BUSINESS_A)]) == 0
+    assert _sql("select count(*) from label_updates where tag_id = :t", {"t": TAG_B}) == [(1,)]
+    assert _sql("select version from tags where id = :t", {"t": TAG_B}) == [(1,)]
+
+
+def test_push_all_ignores_a_colliding_variation_id_in_another_business(seeded):
+    # Business B also has a VAR_A, priced differently. The admin login bypasses RLS.
+    _sql("insert into catalog_items (business_id, id, name, updated_at) values (:b, 'ITEM_X', 'Item X', now())",
+         {"b": BUSINESS_B})
+    _sql("insert into catalog_variations (business_id, id, item_id, variation_name, sku, price, "
+         "pricing_type, currency, updated_at) values (:b, 'VAR_A', 'ITEM_X', 'Other', 'SKU-X', 9999, "
+         "'FIXED_PRICING', 'USD', now())", {"b": BUSINESS_B})
+    assert cli.main(["admin", "push-all", "--business", str(BUSINESS_A)]) == 0
+    [(display,)] = _sql("select display from label_updates where tag_id = :t and version = 2", {"t": TAG_A})
+    assert display["itemName"] == "Item A"
+    assert display["price"]["amount"] == "10.00"
