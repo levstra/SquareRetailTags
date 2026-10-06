@@ -75,3 +75,21 @@ async def test_api_shows_store_price(client, admin_session):
     assert tags["A2A2A2A2A2A2"]["price"] == 1200
     put = await client.put("/v1/tags/A2A2A2A2A2A2", json={"variation_id": "VAR_A"})
     assert put.json()["content_hash"] == GOLDEN_HASH_VAR_A_LOC_A2_OVERRIDE
+
+
+async def test_force_enqueues_even_when_hash_unchanged():
+    from sqlalchemy import select
+    from esl.gateway.models import LabelUpdate
+    async with business_session(BUSINESS_A) as session:
+        tag = await session.get(Tag, TAG_A)
+        assert await apply_desired_state(session, tag) is True
+        version = tag.version
+        assert await apply_desired_state(session, tag) is False  # default: nothing enqueued
+        assert tag.version == version
+        assert await apply_desired_state(session, tag, force=True) is True
+        assert tag.content_hash == GOLDEN_HASH_VAR_A
+        assert tag.version == version + 1
+        pending = (await session.execute(
+            select(LabelUpdate.version).where(LabelUpdate.tag_id == TAG_A, LabelUpdate.status == "Pending")
+        )).scalars().all()
+        assert pending == [version + 1]  # the earlier pending command was superseded

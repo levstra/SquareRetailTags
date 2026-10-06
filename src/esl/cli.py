@@ -10,6 +10,7 @@ from sqlalchemy.pool import NullPool
 from esl.accounts.identity import make_identity_provider
 from esl.accounts.service import create_business, invite_user
 from esl.config import settings
+from esl.gateway.admin import create_gateway, push_all, revoke_gateway, set_store_code
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,6 +29,22 @@ def _parser() -> argparse.ArgumentParser:
     invite.add_argument("--role", choices=["owner", "staff"], default="owner")
     invite.add_argument("--all-stores", action="store_true",
                         help="staff only: every store, including stores added later")
+
+    gw = admin.add_parser("add-gateway", help="issue a store key for a Pi (printed once)")
+    gw.add_argument("--business", required=True, type=uuid.UUID)
+    gw.add_argument("--store", required=True, type=uuid.UUID)
+    gw.add_argument("--name", required=True)
+
+    revoke = admin.add_parser("revoke-gateway", help="revoke a Pi's key immediately")
+    revoke.add_argument("gateway", type=uuid.UUID)
+
+    code = admin.add_parser("set-store-code", help="set the storeId the store's Pi uses")
+    code.add_argument("--store", required=True, type=uuid.UUID)
+    code.add_argument("--code", required=True)
+
+    push = admin.add_parser("push-all", help="send every tag its current desired state")
+    push.add_argument("--business", required=True, type=uuid.UUID)
+    push.add_argument("--store", type=uuid.UUID)
     return parser
 
 
@@ -38,13 +55,14 @@ async def _run(args: argparse.Namespace) -> int:
     engine = create_async_engine(settings.admin_database_url, poolclass=NullPool)
     try:
         async with AsyncSession(engine, expire_on_commit=False) as session:
-            idp = make_identity_provider()
             if args.command == "create-business":
+                idp = make_identity_provider()
                 business_id = await create_business(
                     session, idp, name=args.name, owner_email=args.owner_email, store_name=args.store_name
                 )
                 print(f"Created business {business_id}; invited {args.owner_email.strip().lower()} as owner.")
             elif args.command == "invite-user":
+                idp = make_identity_provider()
                 user = await invite_user(
                     session, idp, business_id=args.business, email=args.email, role=args.role,
                     all_stores=args.all_stores,
@@ -53,6 +71,22 @@ async def _run(args: argparse.Namespace) -> int:
                 if user.role == "staff" and not user.all_stores:
                     print("They have no store access yet. Grant stores on the Staff tab, "
                           "or re-run with --all-stores.")
+            elif args.command == "add-gateway":
+                gateway, key = await create_gateway(
+                    session, business_id=args.business, store_id=args.store, name=args.name
+                )
+                print(f"Gateway {gateway.id} ({gateway.name}) for store {gateway.store_id}.")
+                print("Store key (shown once; put it in the Pi's CentralApi:ApiKey):")
+                print(f"  {key}")
+            elif args.command == "revoke-gateway":
+                gateway = await revoke_gateway(session, args.gateway)
+                print(f"Revoked gateway {gateway.id} ({gateway.name}).")
+            elif args.command == "set-store-code":
+                store = await set_store_code(session, store_id=args.store, code=args.code)
+                print(f"Store {store.id} now uses storeId {store.code}.")
+            elif args.command == "push-all":
+                count = await push_all(session, business_id=args.business, store_id=args.store)
+                print(f"Queued the current state for {count} tag(s).")
     finally:
         await engine.dispose()
     return 0
