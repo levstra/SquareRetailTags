@@ -20,8 +20,9 @@ ESL Pricing Service  ──commands──►  Store Pi (WestgateLabels)  ──r
   cursor so it only pulls what changed since the last sync.
 - **This service** owns what each tag *should* display. It projects the
   relevant Square fields (name, variation, sku, price, pricing type) into a
-  `Tag` record, computes a deterministic `content_hash` of that projection,
-  and exposes it over HTTP.
+  `Tag` record and computes a deterministic `content_hash` of that
+  projection. When the hash changes, it queues one versioned label command
+  for the store's Pi.
 - **The Pi gateway** (`WestgateLabels`) long-polls this service for label
   commands (`Update`, `Unassign`, `Locate`), drives the tags through its
   access points, and reports each command's outcome plus label and access
@@ -37,7 +38,9 @@ immediately instead of waiting for the next scheduled poll.
 |---|---|
 | `src/esl/square/` | Only place allowed to import the Square SDK |
 | `src/esl/catalog/` | Square sync jobs, local catalog mirror |
-| `src/esl/tags/` | Desired-state model, content hashing, drift detection |
+| `src/esl/tags/` | Projection, content hashing, desired state, per-tag command status |
+| `src/esl/gateway/` | The Pi side: store keys and auth, command queue, status reports, telemetry, reconciliation |
+| `src/esl/jobs/` | Scheduled jobs (15-minute sync, command reconciliation, token refresh) |
 | `src/esl/web/` | FastAPI app — the HTTP contract described below |
 | `frontend/` | React/Vite admin UI for assigning variations to tags |
 | `api/esl-pricing-api.yaml` | OpenAPI for this service (dashboard + the gateway section copied from the Pi contract) |
@@ -103,6 +106,8 @@ Tip for sandbox: open your sandbox test account's Square Dashboard from the
 Developer Console first ("Sandbox test accounts" → "Open in Square
 Dashboard"), so the approval page is already signed in to it.
 
+Production deployment: see docs/deploy.md.
+
 ---
 
 ## The Pi gateway contract
@@ -122,14 +127,36 @@ Keys and store codes are issued by the operator:
 (prints the key once). On the Pi set `CentralApi__BaseUrl`,
 `CentralApi__StoreId` and `CentralApi__ApiKey`.
 
-After migrating an existing database to `0006`, and after replacing a Pi, run
-`esl admin push-all --business <id> [--store <id>]`. Existing tags start at
+Day to day, nothing needs running by hand. A price change in Square reaches
+this service via webhook (or the 15-minute sync), changes the tag's
+`content_hash`, and queues an `Update`; the Pi picks it up on its next long
+poll, usually within a second. Pairing a tag in the dashboard does the same.
+
+`esl admin push-all --business <id> [--store <id>]` re-sends every tag's
+current state even though nothing changed. Run it once after migrating an
+existing database to `0006`, and after replacing a Pi. Existing tags start at
 version 0 and are only sent a command when their content changes, so without
-this they get nothing.
+it they get nothing.
 
 Downgrading migration `0006` is destructive and effectively one-way once a Pi
 has received commands: versions restart at 0, and the Pi (which keeps the
 highest version it applied per tag) reports every later update as Superseded.
 
-To run the Pi service against a local central API, see "End-to-end with the
-real Pi" in `docs/superpowers/plans/2026-10-04-step4-gateway-contract.md`.
+### Running the Pi service against your local API
+
+With `make dev` running (API on port 8001), issue a key as above, then in
+`../WestgateLabels`:
+
+```powershell
+$env:CentralApi__BaseUrl = 'http://localhost:8001/'
+$env:CentralApi__StoreId = 'STORE-001'
+$env:CentralApi__ApiKey = '<the rtg_live_ key>'
+$env:Pipeline__DatabasePath = "$env:TEMP\westgate-dev.db"
+dotnet run --project WestgateLabels
+```
+
+The Pi logs `Polling central API http://localhost:8001/ for store STORE-001`
+and the gateway's `last_seen_at` updates. A wrong key gets `401` and a wrong
+`StoreId` gets `403`. Either way the Pi logs the status and backs off up to
+60 s. If an access point is connected to this PC, commands are really sent to
+tags in range, so pair only tags you mean to change.

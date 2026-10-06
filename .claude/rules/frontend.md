@@ -38,5 +38,5 @@ Call the API through the typed client in `src/api/client.ts`
   (failed command, low battery, not heard from, still sending) — the
   recurring operational task is "which tags need a person."
 - Money arrives as integer cents. Format at the render boundary only.
-- Dev requests go through the Vite proxy (`/v1` → localhost:8000).
+- Dev requests go through the Vite proxy (`/v1` → localhost:8001).
   Never hardcode an absolute backend URL; production is same-origin.
