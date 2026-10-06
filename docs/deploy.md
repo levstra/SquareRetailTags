@@ -24,6 +24,19 @@ Decisions to settle first. Record the answers in `infra/prod/prod.tfvars`
 | 5b | Does the AWS account already have a GitHub OIDC provider? If yes, set `create_github_oidc_provider = false` | _to decide_ |
 | 6 | Square **production** application ID (the secret is entered later, by you) | _to decide_ (`square_application_id`) |
 
+## Preflight (read-only)
+
+```powershell
+aws sts get-caller-identity
+aws route53 list-hosted-zones-by-name --dns-name levstra.com --max-items 1
+aws iam list-open-id-connect-providers
+```
+
+The account must be the one you intend. The `levstra.com` hosted zone must
+exist before `deploy_service = true`. If a GitHub OIDC provider
+(`token.actions.githubusercontent.com`) is already listed, set
+`create_github_oidc_provider = false`; otherwise leave it `true`.
+
 ## 1. State bucket [CHANGES AWS]
 
 ```powershell
@@ -65,6 +78,10 @@ aws secretsmanager put-secret-value --secret-id <secret_arns.square_webhook_sign
 ```
 
 ## 4. First image [CHANGES AWS]
+
+Build from a clean checkout of the commit being deployed, not a working tree
+with uncommitted edits (e.g. `git worktree add ..\esl-release <sha>`, then run
+this step from there).
 
 ```powershell
 $repo = terraform -chdir=infra/prod output -raw ecr_repository_url
@@ -130,10 +147,13 @@ In the Square Developer Console, production tab:
 
 ## 9. GitHub environment and variables [CHANGES GITHUB]
 
-Uses the `gh` CLI.
+Uses the `gh` CLI. Merging to `main` before this step produces one red
+`deploy` run (no role or variables yet); that is expected and harmless.
 
 ```powershell
-gh api -X PUT "repos/estrellaSMC/SquareRetailTags/environments/production" | Out-Null
+# Restrict the environment to main; the OIDC trust on environment:production then only works from main.
+gh api -X PUT "repos/estrellaSMC/SquareRetailTags/environments/production" -F "deployment_branch_policy[protected_branches]=false" -F "deployment_branch_policy[custom_branch_policies]=true" | Out-Null
+gh api -X POST "repos/estrellaSMC/SquareRetailTags/environments/production/deployment-branch-policies" -f name=main | Out-Null
 $o = terraform -chdir=infra/prod output -json | ConvertFrom-Json
 $vars = @{
   AWS_REGION = $o.region.value
@@ -178,8 +198,8 @@ tests, build, migration exit 0, deployment `SUCCEEDED`, smoke test 200.
 aws cloudwatch describe-alarms --alarm-name-prefix esl-prod --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
 ```
 
-Expected: `esl-prod-5xx`, `esl-prod-square-sync-failures` and
-`esl-prod-nat-recover` present; states `OK` or `INSUFFICIENT_DATA`.
+Expected: `esl-prod-5xx`, `esl-prod-square-sync-failures`,
+`esl-prod-label-repends` and `esl-prod-nat-recover` present; states `OK` or `INSUFFICIENT_DATA`.
 
 ## Routine deploys
 
@@ -189,6 +209,11 @@ be backward compatible with the release that is still running (expand first,
 contract in a later release).
 
 ## Rollback
+
+If a deploy run went red after the "Promote to :prod and deploy" step and CI
+did not report restoring `:prod`, re-point `:prod` with the procedure below
+before any `start-deployment` or `admin.ps1` run (they would use the rejected
+image).
 
 ```powershell
 $sha = '<previous good commit>'   # the full 40-character sha (CI tags images with $GITHUB_SHA)
@@ -235,15 +260,18 @@ changes), and once after migrating an existing database to `0006`.
   owner must reconnect Square. Don't rotate it without a re-encryption plan.
 - DB passwords: `terraform -chdir=infra/prod apply -var-file=prod.tfvars -replace=random_password.db_app`
   (or `db_admin`), then `.\scripts\admin.ps1 -Task bootstrap` (re-sets passwords),
-  then deploy.
+  then run `aws apprunner start-deployment --service-arn <apprunner_service_arn>`
+  immediately after `-Task bootstrap`: until the service restarts, its
+  connections with the old password fail.
 
 ## Operational notes
 
 - Any change to `infra/prod/nat-user-data.sh` replaces the NAT instance: a few
   minutes with no outbound traffic for App Runner and tasks. Apply outside
   business hours.
-- The ECR lifecycle keeps the 30 most recent images; rollback targets older
-  than that are gone.
+- The ECR lifecycle keeps the 30 most recent images, and never expires the
+  images tagged `:prod` or `:candidate` (a rule at priority 1); rollback
+  targets older than that are gone.
 - If the migrate step in CI times out (~10 min), the Fargate task may still be
   running: check it with `aws ecs list-tasks --cluster esl-prod --family esl-prod-migrate`
   before re-running.

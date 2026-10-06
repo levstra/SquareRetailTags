@@ -44,6 +44,7 @@ jobs:
 
   deploy:
     needs: test
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -98,21 +99,37 @@ jobs:
           SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
         run: |
           set -euo pipefail
+          REPO_NAME="${REPO##*/}"
+          # Remember what :prod points at so a failed deployment can put it back
+          # (a first deploy has no :prod yet).
+          PREV=$(aws ecr batch-get-image --repository-name "$REPO_NAME" --image-ids imageTag=prod             --query 'images[0].imageManifest' --output text 2>/dev/null || true)
+          restore_prod() {
+            if [ -n "$PREV" ] && [ "$PREV" != "None" ]; then
+              if aws ecr put-image --repository-name "$REPO_NAME" --image-tag prod --image-manifest "$PREV" >/dev/null; then
+                echo "Deployment failed: :prod restored to the previous image."
+              else
+                echo "Deployment failed AND restoring :prod failed. Re-point :prod by hand (docs/deploy.md, Rollback)."
+              fi
+            else
+              echo "Deployment failed: there was no previous :prod image to restore."
+            fi
+          }
           docker tag "$REPO:$GITHUB_SHA" "$REPO:prod"
           docker push "$REPO:prod"
-          OP=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query OperationId --output text)
+          OP=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query OperationId --output text) || { restore_prod; exit 1; }
           echo "deployment operation: $OP"
           for i in $(seq 1 80); do
-            STATUS=$(aws apprunner list-operations --service-arn "$SERVICE_ARN" \
-              --query "OperationSummaryList[?Id=='$OP'].Status | [0]" --output text)
+            STATUS=$(aws apprunner list-operations --service-arn "$SERVICE_ARN"               --query "OperationSummaryList[?Id=='$OP'].Status | [0]" --output text) || STATUS="UNKNOWN"
             echo "status: $STATUS"
             case "$STATUS" in
               SUCCEEDED) exit 0 ;;
-              FAILED|ROLLBACK_IN_PROGRESS|ROLLBACK_SUCCEEDED|ROLLBACK_FAILED) exit 1 ;;
+              FAILED|ROLLBACK_IN_PROGRESS|ROLLBACK_SUCCEEDED|ROLLBACK_FAILED) restore_prod; exit 1 ;;
             esac
             sleep 15
           done
-          echo "timed out waiting for App Runner"; exit 1
+          echo "timed out waiting for App Runner"
+          restore_prod
+          exit 1
 
       - name: Smoke test
         run: |
