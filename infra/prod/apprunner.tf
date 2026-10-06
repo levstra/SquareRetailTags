@@ -81,6 +81,13 @@ resource "aws_apprunner_service" "app" {
   count        = var.deploy_service ? 1 : 0
   service_name = local.name
 
+  lifecycle {
+    precondition {
+      condition     = var.square_application_id != ""
+      error_message = "Set square_application_id in prod.tfvars before deploy_service = true."
+    }
+  }
+
   source_configuration {
     auto_deployments_enabled = false # CI runs migrations first, then start-deployment
     authentication_configuration {

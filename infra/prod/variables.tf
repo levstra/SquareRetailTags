@@ -21,6 +21,10 @@ variable "app_subdomain" {
 variable "cognito_domain_prefix" {
   type        = string
   description = "Globally unique prefix for <prefix>.auth.<region>.amazoncognito.com."
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", var.cognito_domain_prefix)) && !can(regex("aws|amazon|cognito", var.cognito_domain_prefix))
+    error_message = "cognito_domain_prefix must be lowercase letters, digits and hyphens (not starting or ending with a hyphen) and must not contain aws, amazon or cognito."
+  }
 }
 
 variable "alarm_email" {

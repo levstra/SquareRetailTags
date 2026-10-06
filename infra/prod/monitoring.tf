@@ -55,3 +55,35 @@ resource "aws_cloudwatch_metric_alarm" "sync_failures" {
   ok_actions          = [aws_sns_topic.alarms.arn]
   depends_on          = [aws_cloudwatch_log_metric_filter.sync_failures]
 }
+
+# esl.gateway.reconcile logs (ERROR) "Label update <id> for tag <tag> re-pended
+# <n> times without a final report".
+resource "aws_cloudwatch_log_metric_filter" "repends" {
+  count          = var.deploy_service ? 1 : 0
+  name           = "${local.name}-label-repends"
+  log_group_name = "/aws/apprunner/${aws_apprunner_service.app[0].service_name}/${aws_apprunner_service.app[0].service_id}/application"
+  pattern        = "\"re-pended\""
+  metric_transformation {
+    name          = "LabelRepends"
+    namespace     = "ESL/${var.environment}"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "repends" {
+  count               = var.deploy_service ? 1 : 0
+  alarm_name          = "${local.name}-label-repends"
+  alarm_description   = "A label update was re-pended repeatedly: a Pi accepted commands but never reported back. Search the application log for 're-pended' to find the tag and store."
+  namespace           = "ESL/${var.environment}"
+  metric_name         = "LabelRepends"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+  depends_on          = [aws_cloudwatch_log_metric_filter.repends]
+}

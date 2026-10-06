@@ -1,4 +1,5 @@
 data "aws_route53_zone" "main" {
+  count        = var.deploy_service ? 1 : 0
   name         = var.hosted_zone_name
   private_zone = false
 }
@@ -12,7 +13,7 @@ resource "aws_apprunner_custom_domain_association" "app" {
 
 resource "aws_route53_record" "app" {
   count   = var.deploy_service ? 1 : 0
-  zone_id = data.aws_route53_zone.main.zone_id
+  zone_id = data.aws_route53_zone.main[0].zone_id
   name    = local.app_host
   type    = "CNAME"
   ttl     = 300
@@ -25,7 +26,7 @@ resource "aws_route53_record" "app_certificate_validation" {
   for_each = {
     for r in try(aws_apprunner_custom_domain_association.app[0].certificate_validation_records, []) : r.name => r
   }
-  zone_id = data.aws_route53_zone.main.zone_id
+  zone_id = data.aws_route53_zone.main[0].zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 300
