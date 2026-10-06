@@ -1,6 +1,7 @@
 """Operator commands. Run as the admin DB login (RLS does not apply)."""
 import argparse
 import asyncio
+import os
 import sys
 import uuid
 
@@ -9,6 +10,7 @@ from sqlalchemy.pool import NullPool
 
 from esl.accounts.identity import make_identity_provider
 from esl.accounts.service import create_business, invite_user
+from esl.admin_db import REQUIRED_ENV, bootstrap_db, master_url_from_env
 from esl.config import settings
 from esl.gateway.admin import create_gateway, push_all, revoke_gateway, set_store_code
 
@@ -30,6 +32,11 @@ def _parser() -> argparse.ArgumentParser:
     invite.add_argument("--all-stores", action="store_true",
                         help="staff only: every store, including stores added later")
 
+    admin.add_parser(
+        "bootstrap-db",
+        help="one-time: create the esl_admin/esl_app logins on a fresh RDS (run as the master user)",
+    )
+
     gw = admin.add_parser("add-gateway", help="issue a store key for a Pi (printed once)")
     gw.add_argument("--business", required=True, type=uuid.UUID)
     gw.add_argument("--store", required=True, type=uuid.UUID)
@@ -48,7 +55,24 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def _bootstrap(env) -> int:
+    missing = [name for name in REQUIRED_ENV if not env.get(name)]
+    if missing:
+        print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    await bootstrap_db(
+        master_url_from_env(env),
+        database=env["DB_NAME"],
+        admin_password=env["ESL_ADMIN_PASSWORD"],
+        app_password=env["ESL_APP_PASSWORD"],
+    )
+    print(f"Database roles ready: esl_admin owns {env['DB_NAME']}; esl_app can log in.")
+    return 0
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.command == "bootstrap-db":
+        return await _bootstrap(os.environ)
     if not settings.admin_database_url:
         print("ADMIN_DATABASE_URL is not set.", file=sys.stderr)
         return 2
