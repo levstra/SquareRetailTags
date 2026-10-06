@@ -6,11 +6,15 @@ from esl.web.app import create_app
 
 @pytest.fixture
 def dist(tmp_path):
-    (tmp_path / "assets").mkdir()
-    (tmp_path / "index.html").write_text("<!doctype html><title>ESL</title>")
-    (tmp_path / "assets" / "index-abc123.js").write_text("console.log('app')")
-    (tmp_path / "favicon.svg").write_text("<svg/>")
-    return tmp_path
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "assets").mkdir()
+    (dist_dir / "index.html").write_text("<!doctype html><title>ESL</title>")
+    (dist_dir / "assets" / "index-abc123.js").write_text("console.log('app')")
+    (dist_dir / "favicon.svg").write_text("<svg/>")
+    # Write a sentinel file outside dist to test traversal protection
+    (tmp_path / "secret.txt").write_text("CONFIDENTIAL_DATA_SHOULD_NOT_BE_ACCESSIBLE")
+    return dist_dir
 
 
 async def _client(app):
@@ -59,8 +63,8 @@ async def test_api_routes_still_win(spa):
 
 
 async def test_no_path_traversal(spa):
-    r = await spa.get("/%2e%2e/%2e%2e/pyproject.toml")
-    assert "hatchling" not in r.text
+    r = await spa.get("/%2e%2e/secret.txt")
+    assert "CONFIDENTIAL_DATA_SHOULD_NOT_BE_ACCESSIBLE" not in r.text
 
 
 async def test_no_dist_means_no_frontend(tmp_path):
