@@ -193,7 +193,7 @@ contract in a later release).
 ```powershell
 $sha = '<previous good commit>'   # the full 40-character sha (CI tags images with $GITHUB_SHA)
 $manifest = aws ecr batch-get-image --repository-name esl-prod --image-ids imageTag=$sha --query 'images[0].imageManifest' --output text
-[System.IO.File]::WriteAllText("$PWD\manifest.json", $manifest)   # not `>`: PowerShell 5.1 would write UTF-16
+[System.IO.File]::WriteAllText("$PWD\manifest.json", ($manifest -join "`n"))   # not `>`: PowerShell 5.1 would write UTF-16
 aws ecr put-image --repository-name esl-prod --image-tag prod --image-manifest file://manifest.json
 aws apprunner start-deployment --service-arn <apprunner_service_arn>
 ```
