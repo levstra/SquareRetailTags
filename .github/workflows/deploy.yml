@@ -1,0 +1,119 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: esl
+          POSTGRES_USER: esl
+          POSTGRES_PASSWORD: esl
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U esl"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run lint
+      - run: npm --prefix frontend run build
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC → AWS, no stored keys
+    env:
+      REPO: ${{ vars.ECR_REPOSITORY_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push :sha and :candidate
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg VITE_COGNITO_AUTHORITY="${{ vars.VITE_COGNITO_AUTHORITY }}" \
+            --build-arg VITE_COGNITO_CLIENT_ID="${{ vars.VITE_COGNITO_CLIENT_ID }}" \
+            --build-arg VITE_COGNITO_DOMAIN="${{ vars.VITE_COGNITO_DOMAIN }}" \
+            -t "$REPO:$GITHUB_SHA" -t "$REPO:candidate" .
+          docker push "$REPO:$GITHUB_SHA"
+          docker push "$REPO:candidate"
+
+      - name: Run migrations (new image, esl_admin)
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SUBNETS: ${{ vars.PRIVATE_SUBNET_IDS }}
+          SG: ${{ vars.TASK_SECURITY_GROUP_ID }}
+          TASK_DEF: ${{ vars.MIGRATE_TASK_DEFINITION }}
+          LOG_GROUP: ${{ vars.TASKS_LOG_GROUP }}
+        run: |
+          set -euo pipefail
+          TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+          TASK_ID="${TASK_ARN##*/}"
+          aws logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "migrate/esl/$TASK_ID" \
+            --start-from-head --query 'events[].message' --output text || true
+          EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $EXIT"
+          test "$EXIT" = "0"
+
+      - name: Promote to :prod and deploy
+        env:
+          SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+        run: |
+          set -euo pipefail
+          docker tag "$REPO:$GITHUB_SHA" "$REPO:prod"
+          docker push "$REPO:prod"
+          OP=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query OperationId --output text)
+          echo "deployment operation: $OP"
+          for i in $(seq 1 80); do
+            STATUS=$(aws apprunner list-operations --service-arn "$SERVICE_ARN" \
+              --query "OperationSummaryList[?Id=='$OP'].Status | [0]" --output text)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|ROLLBACK_IN_PROGRESS|ROLLBACK_SUCCEEDED|ROLLBACK_FAILED) exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "timed out waiting for App Runner"; exit 1
+
+      - name: Smoke test
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "${{ vars.APP_URL }}/v1/health"
