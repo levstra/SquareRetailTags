@@ -6,6 +6,7 @@ from esl.gateway.commands import enqueue_locate
 from esl.gateway.display import build_display, format_amount
 from esl.gateway.models import LabelUpdate
 from esl.tags.desired import apply_desired_state
+from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import UNASSIGNED, Projection
 from tests.seed import BUSINESS_A, STORE_A, TAG_A, TAG_B
@@ -164,3 +165,84 @@ async def test_pairing_foreign_tag_with_variation_is_409_not_500(client):
     response = await client.put(f"/v1/tags/{TAG_B}", json={"variation_id": "VAR_A"})
     assert response.status_code == 409
     assert response.json()["detail"] == "This tag can't be used"
+
+
+# ---- redundant Unassign (battery): an undisplayable tag that stays undisplayable is not rewritten ----
+
+async def _make_var_a_variable(admin_session):
+    await admin_session.execute(text(
+        "update catalog_variations set price = null, pricing_type = 'VARIABLE_PRICING' where id = 'VAR_A'"
+    ))
+    await admin_session.commit()
+
+
+async def _apply(tag_id: str = TAG_A, *, force: bool = False):
+    async with business_session(BUSINESS_A) as session:
+        tag = await session.get(Tag, tag_id)
+        changed = await apply_desired_state(session, tag, force=force)
+        await session.commit()
+        commands = await _commands(session, tag_id)
+        return changed, tag.version, tag.content_hash, [(c.action, c.version, c.status) for c in commands]
+
+
+async def test_renaming_a_variable_priced_item_sends_no_second_unassign(admin_session):
+    await _make_var_a_variable(admin_session)
+    _, _, _, before = await _apply()
+    assert before[-1] == ("Unassign", 2, "Pending")
+    await admin_session.execute(text("update catalog_items set name = 'Item A renamed' where id = 'ITEM_A'"))
+    await admin_session.commit()
+
+    changed, version, content_hash, after = await _apply()
+
+    assert changed is True  # the hash still follows the catalog
+    assert content_hash == hash_projection(Projection(
+        name="Item A renamed", variation_name="Regular", sku="SKU-A", price=None, pricing_type="VARIABLE_PRICING"))
+    assert (after, version) == (before, 2)  # but no radio write
+
+
+async def test_unassign_after_a_succeeded_unassign_is_skipped_too(admin_session):
+    await _make_var_a_variable(admin_session)
+    _, _, _, before = await _apply()
+    await admin_session.execute(text("update label_updates set status = 'Succeeded' where tag_id = :t and version = 2"),
+                                {"t": TAG_A})
+    await admin_session.execute(text("update catalog_items set name = 'Item A renamed' where id = 'ITEM_A'"))
+    await admin_session.commit()
+    _, version, _, after = await _apply()
+    assert version == 2 and len(after) == len(before)
+
+
+async def test_hash_change_after_a_failed_unassign_sends_a_new_unassign(admin_session):
+    await _make_var_a_variable(admin_session)
+    await _apply()
+    await admin_session.execute(text("update label_updates set status = 'Failed', retryable = false "
+                                     "where tag_id = :t and version = 2"), {"t": TAG_A})
+    await admin_session.execute(text("update catalog_items set name = 'Item A renamed' where id = 'ITEM_A'"))
+    await admin_session.commit()
+
+    _, version, _, after = await _apply()
+
+    assert version == 3
+    assert after[-1] == ("Unassign", 3, "Pending")
+
+
+async def test_update_unassign_update_versions_increase_by_one(admin_session):
+    await admin_session.execute(text("update catalog_variations set price = 1500 where id = 'VAR_A'"))
+    await admin_session.commit()
+    await _apply()
+    await _make_var_a_variable(admin_session)
+    await _apply()
+    await admin_session.execute(text(
+        "update catalog_variations set price = 1700, pricing_type = 'FIXED_PRICING' where id = 'VAR_A'"))
+    await admin_session.commit()
+    _, version, _, commands = await _apply()
+    assert version == 4
+    assert [(a, v) for a, v, _ in commands] == [("Update", 1), ("Update", 2), ("Unassign", 3), ("Update", 4)]
+
+
+async def test_force_still_sends_unassign_when_one_is_outstanding(admin_session):
+    # push-all (a replaced Pi knows nothing): forcing always sends.
+    await _make_var_a_variable(admin_session)
+    await _apply()
+    _, version, _, commands = await _apply(force=True)
+    assert version == 3
+    assert commands[-2:] == [("Unassign", 2, "Superseded"), ("Unassign", 3, "Pending")]

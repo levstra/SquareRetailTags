@@ -48,13 +48,34 @@ async def _supersede_pending(session: AsyncSession, tag: Tag, actions: tuple[str
     )
 
 
+async def _latest_display_command(session: AsyncSession, tag: Tag) -> LabelUpdate | None:
+    return (await session.execute(
+        select(LabelUpdate)
+        .where(LabelUpdate.business_id == tag.business_id, LabelUpdate.tag_id == tag.id,
+               LabelUpdate.action.in_(DISPLAY_ACTIONS), LabelUpdate.version.is_not(None))
+        .order_by(LabelUpdate.version.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
 async def enqueue_for_tag(
-    session: AsyncSession, tag: Tag, projection: Projection, currency: str | None
-) -> LabelUpdate:
-    """Issue the next display version for `tag`. Does not commit."""
+    session: AsyncSession, tag: Tag, projection: Projection, currency: str | None, *, force: bool = False
+) -> LabelUpdate | None:
+    """Issue the next display version for `tag`. Does not commit.
+
+    Returns None without enqueueing when the tag would be sent Unassign but its latest
+    display command already is an Unassign that hasn't Failed: an Unassign carries no
+    content, so a second one (e.g. a variable-priced item renamed) is a wasted radio
+    write. `force` (operator push-all) always sends.
+    """
+    displayable = can_display(projection, currency)
+    if not displayable and not force:
+        latest = await _latest_display_command(session, tag)
+        if latest is not None and latest.action == "Unassign" and latest.status != "Failed":
+            return None
     tag.version += 1
     await _supersede_pending(session, tag, DISPLAY_ACTIONS, f"Superseded centrally by version {tag.version}")
-    if can_display(projection, currency):
+    if displayable:
         command = _new(tag, action="Update", version=tag.version, product_id=tag.variation_id,
                        display=build_display(projection, currency))
     else:

@@ -72,11 +72,13 @@ async def apply_desired_state(session: AsyncSession, tag: Tag, *, force: bool = 
     Same weight as projection.py/hashing.py: this decides whether a tag is rewritten.
     An unchanged hash enqueues nothing, unless `force` (operator push-all: first deploy,
     Pi replacement), which enqueues the current state anyway and still sets the hash.
+    A changed hash on a tag that stays unassigned sets the hash but sends nothing
+    (see enqueue_for_tag); `force` sends regardless.
     """
     projection = await desired_projection(session, tag)
     new_hash = hash_projection(projection)
     if new_hash == tag.content_hash and not force:
         return False
     tag.content_hash = new_hash
-    await enqueue_for_tag(session, tag, projection, await variation_currency(session, tag))
+    await enqueue_for_tag(session, tag, projection, await variation_currency(session, tag), force=force)
     return True
