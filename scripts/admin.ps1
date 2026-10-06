@@ -8,7 +8,7 @@ Runs an operator command as a one-off Fargate task in production and prints its 
 Requires the AWS CLI signed in to the production account and access to the
 Terraform state (it reads `terraform output`).
 #>
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [ValidateSet('admin', 'migrate', 'bootstrap')]
     [string]$Task = 'admin',
@@ -22,6 +22,38 @@ function Invoke-Aws {
     $output = & aws @args
     if ($LASTEXITCODE -ne 0) { throw "aws $($args -join ' ') failed with exit code $LASTEXITCODE." }
     return $output
+}
+
+function Get-TaskLogs {
+    param([string[]]$LogArgs, [ref]$EventsPrinted, [ref]$LastStderr)
+
+    $local:ErrorActionPreference = 'Continue'
+    $page = & aws @LogArgs 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        if ($page) {
+            # Store stderr for later warning if no events are ever printed
+            $LastStderr.Value = $page -join "`n"
+        }
+        return $null
+    }
+
+    if (-not $page) {
+        return $null
+    }
+
+    $events = $page | ConvertFrom-Json -ErrorAction Continue
+    if (-not $events -or -not $events.events) {
+        return $null
+    }
+
+    foreach ($e in $events.events) {
+        Write-Host $e.message
+        $EventsPrinted.Value = $true
+    }
+
+    return $events.nextForwardToken
 }
 
 $infra = Join-Path $PSScriptRoot '..\infra\prod'
@@ -64,19 +96,36 @@ Write-Host "Started $family task $taskId" -ForegroundColor Cyan
 
 $nextToken = $null
 $status = ''
+$eventsPrinted = $false
+$lastStderr = ''
+
 do {
     Start-Sleep -Seconds 3
     $status = Invoke-Aws ecs describe-tasks --region $region --cluster $cluster --tasks $taskArn --query 'tasks[0].lastStatus' --output text
     $logArgs = @('logs', 'get-log-events', '--region', $region, '--log-group-name', $logGroup,
                  '--log-stream-name', $stream, '--start-from-head', '--output', 'json')
     if ($nextToken) { $logArgs += @('--next-token', $nextToken) }
-    $page = & aws @logArgs 2>$null
-    if ($LASTEXITCODE -eq 0 -and $page) {
-        $events = $page | ConvertFrom-Json
-        foreach ($e in $events.events) { Write-Host $e.message }
-        $nextToken = $events.nextForwardToken
-    }
+    $newToken = Get-TaskLogs $logArgs ([ref]$eventsPrinted) ([ref]$lastStderr)
+    if ($newToken) { $nextToken = $newToken }
 } while ($status -ne 'STOPPED')
+
+# Final log drain: wait for any pending CloudWatch writes and fetch remaining logs
+Start-Sleep -Seconds 5
+$lastToken = $nextToken
+do {
+    $logArgs = @('logs', 'get-log-events', '--region', $region, '--log-group-name', $logGroup,
+                 '--log-stream-name', $stream, '--start-from-head', '--output', 'json')
+    if ($nextToken) { $logArgs += @('--next-token', $nextToken) }
+    $newToken = Get-TaskLogs $logArgs ([ref]$eventsPrinted) ([ref]$lastStderr)
+    if ($newToken) { $nextToken = $newToken } else { break }
+} while ($nextToken -ne $lastToken -or -not $nextToken)
+
+if (-not $eventsPrinted) {
+    Write-Host "Warning: no logs printed from $logGroup/$stream" -ForegroundColor Yellow
+    if ($lastStderr) {
+        Write-Host "Last error: $lastStderr" -ForegroundColor Yellow
+    }
+}
 
 $exitCode = Invoke-Aws ecs describe-tasks --region $region --cluster $cluster --tasks $taskArn --query 'tasks[0].containers[0].exitCode' --output text
 if ($exitCode -eq 'None') {
