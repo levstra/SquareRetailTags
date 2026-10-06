@@ -1,5 +1,5 @@
 """Status batches (contract sections 1.2, 3, 5). Validate everything, then apply."""
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.gateway.auth import GatewayContext
@@ -38,7 +38,10 @@ async def _apply(session: AsyncSession, command: LabelUpdate, report: StatusRepo
         if command.status != "Pending":
             return  # a terminal command never regresses to Dispatched
         command.status = "Dispatched"
-        command.dispatched_at = report.status_at
+        # Server clock: dispatched_at drives the 30-minute re-pend timer. The Pi's statusAt
+        # for Accepted is its original QueuedAt, which after a re-pend is already >30 min old
+        # and would re-pend the command again on every reconcile run.
+        command.dispatched_at = func.now()
     else:
         command.status = report.status
         command.final_at = report.status_at

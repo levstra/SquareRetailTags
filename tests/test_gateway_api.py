@@ -6,12 +6,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import text
 
+from esl.db import business_session
+from esl.gateway.reconcile import reconcile_commands
 from esl.web.routers import gateway_api
 from tests.contract_examples import (
     LOCATE_COMMAND, SUCCEEDED_REPORT, TELEMETRY, UNASSIGN_COMMAND, UPDATE_COMMAND,
 )
 from tests.gateway_helpers import command_row, insert_command, key
-from tests.seed import BUSINESS_B, GATEWAY_A_KEY, GATEWAY_B_KEY, STORE_B, TAG_A
+from tests.seed import BUSINESS_A, BUSINESS_B, GATEWAY_A_KEY, GATEWAY_B_KEY, STORE_A2, STORE_B, TAG_A
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
@@ -149,9 +151,31 @@ async def test_accepted_moves_pending_to_dispatched(anon_client):
     update_id = await _insert_example(UPDATE_COMMAND)
     accepted = {**SUCCEEDED_REPORT, "status": "Accepted", "statusAt": "2026-09-05T14:03:05Z",
                 "attempt": 0, "apId": None, "diagnostics": None}
+    before = datetime.now(UTC)
     await _post_status(anon_client, [accepted])
     row = await command_row(update_id)
-    assert (row.status, row.dispatched_at) == ("Dispatched", _ts("2026-09-05T14:03:05Z"))
+    assert (row.status, row.status_at) == ("Dispatched", _ts("2026-09-05T14:03:05Z"))
+    # dispatched_at is the server's clock (the reconcile timer), not the Pi's statusAt.
+    assert before - timedelta(seconds=5) <= row.dispatched_at <= datetime.now(UTC) + timedelta(seconds=5)
+
+
+async def test_replayed_accepted_after_repend_does_not_repend_again(anon_client):
+    # The Pi replays its stored Accepted with statusAt = the original QueuedAt (well over 30 min old).
+    update_id = await _insert_example(UPDATE_COMMAND)
+    queued_at = datetime.now(UTC) - timedelta(hours=2)
+    accepted = {**SUCCEEDED_REPORT, "status": "Accepted", "statusAt": queued_at.isoformat(),
+                "attempt": 0, "apId": None, "diagnostics": None}
+    await _post_status(anon_client, [accepted])
+    async with business_session(BUSINESS_A) as session:
+        # 31 minutes after dispatch with no final report: re-pended once.
+        assert await reconcile_commands(session, now=datetime.now(UTC) + timedelta(minutes=31)) == 1
+    assert (await command_row(update_id)).status == "Pending"
+
+    await _post_status(anon_client, [accepted])  # the replay
+    assert (await command_row(update_id)).status == "Dispatched"
+    async with business_session(BUSINESS_A) as session:
+        assert await reconcile_commands(session) == 0
+    assert (await command_row(update_id)).status == "Dispatched"
 
 
 async def test_out_of_order_accepted_does_not_regress_terminal(anon_client):
