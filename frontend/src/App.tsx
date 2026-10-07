@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, clearRedirectMarker } from "./api/client";
 import type { components } from "./api/schema.d.ts";
 import { signOut } from "./auth/userManager";
+import { navigate } from "./router";
 import { SquareSettings } from "./square/SquareSettings";
 import { squareConnectionQuery } from "./square/queries";
 import { StaffPanel } from "./staff/StaffPanel";
@@ -400,6 +401,12 @@ export default function App() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50"
+            onClick={() => navigate("/pair")}
+          >
+            Pair tags
+          </button>
           {tab === "tags" && (
             <button
               className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"

@@ -14,6 +14,8 @@ export interface TagSlot {
   status: "new" | "ready" | "assigned" | "other-store";
   currentName: string | null;
   previousVariationId: string | null;
+  // The store the tag was in before this scan; undo moves it back there.
+  previousStoreId: string | null;
   seenByGateway: boolean;
 }
 

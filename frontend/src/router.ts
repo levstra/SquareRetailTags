@@ -1,0 +1,24 @@
+import { useSyncExternalStore } from "react";
+
+// Two screens don't need a router library. /auth/callback is consumed by
+// react-oidc-context before any route renders.
+const listeners = new Set<() => void>();
+
+function subscribe(onChange: () => void) {
+  listeners.add(onChange);
+  window.addEventListener("popstate", onChange);
+  return () => {
+    listeners.delete(onChange);
+    window.removeEventListener("popstate", onChange);
+  };
+}
+
+export function usePath(): string {
+  return useSyncExternalStore(subscribe, () => window.location.pathname);
+}
+
+export function navigate(path: string): void {
+  if (path === window.location.pathname) return;
+  window.history.pushState({}, "", path);
+  listeners.forEach((notify) => notify());
+}

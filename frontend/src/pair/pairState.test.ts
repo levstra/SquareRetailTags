@@ -7,7 +7,8 @@ const product: ProductChoice = {
 };
 const other: ProductChoice = { ...product, id: "VAR_B", variationName: "Big" };
 const tag: TagSlot = {
-  tagId: "840001262D51", status: "new", currentName: null, previousVariationId: null, seenByGateway: true,
+  tagId: "840001262D51", status: "new", currentName: null, previousVariationId: null, previousStoreId: null,
+  seenByGateway: true,
 };
 
 describe("pairReducer", () => {

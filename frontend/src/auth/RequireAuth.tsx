@@ -8,7 +8,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isSigningOut()) return;
     if (!hasAuthParams() && !auth.isAuthenticated && !auth.activeNavigator && !auth.isLoading && !auth.error) {
-      void auth.signinRedirect();
+      void auth.signinRedirect({ state: { returnTo: window.location.pathname } });
     }
   }, [auth]);
 
@@ -16,7 +16,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return (
       <div className="p-6 text-sm text-red-600">
         Sign-in failed: {auth.error.message}{" "}
-        <button className="underline" onClick={() => void auth.signinRedirect()}>
+        <button className="underline" onClick={() => void auth.signinRedirect({ state: { returnTo: window.location.pathname } })}>
           Try again
         </button>
       </div>

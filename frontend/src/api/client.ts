@@ -46,7 +46,7 @@ const bearer: Middleware = {
     if (response.status === 401 && !redirecting && !isSigningOut() && !recentlyRedirected()) {
       redirecting = true;
       markRedirected();
-      await userManager.signinRedirect();
+      await userManager.signinRedirect({ state: { returnTo: window.location.pathname } });
     }
     return response;
   },
