@@ -25,9 +25,12 @@ export function CameraScanner({ onScan }: { onScan: (code: string) => void }) {
           video: { facingMode: "environment" },
           audio: false,
         });
-        if (stopped) return;
         const video = videoRef.current;
-        if (!video) return;
+        if (stopped || !video) {
+          // Unmounted (or toggled off) while the permission prompt was open.
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         video.srcObject = stream;
         await video.play();
         const tick = async () => {
