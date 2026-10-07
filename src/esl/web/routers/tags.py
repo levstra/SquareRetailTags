@@ -1,4 +1,3 @@
-import re
 import uuid
 from datetime import datetime
 
@@ -12,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
+from esl.scan import normalize_tag_id as scan_normalize_tag_id
 from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
 from esl.tags.projection import Projection
@@ -49,13 +49,10 @@ class AssignBody(BaseModel):
     variation_id: str | None = None
 
 
-_TAG_ID = re.compile(r"^[0-9A-F]{12}$")
-
-
 def normalize_tag_id(tag_id: str) -> str:
     """Tag IDs are 12 uppercase hex characters (the Pi's and the hardware's format)."""
-    normalized = tag_id.strip().upper()
-    if not _TAG_ID.fullmatch(normalized):
+    normalized = scan_normalize_tag_id(tag_id)
+    if normalized is None:
         raise HTTPException(status_code=422, detail="Tag ID must be 12 hexadecimal characters")
     return normalized
 
