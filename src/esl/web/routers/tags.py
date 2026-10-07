@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
-from esl.gateway.commands import enqueue_locate
+from esl.gateway.commands import enqueue_locate, rehome_pending
 from esl.scan import normalize_tag_id as scan_normalize_tag_id
 from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
@@ -168,6 +168,7 @@ async def assign_tag(
     if body.store_id is not None:
         target_store_id = (await get_store_for_user(session, user, body.store_id)).id
 
+    store_moved = False
     tag = await session.get(Tag, tag_id)
     if tag is None:
         if target_store_id is None:
@@ -178,8 +179,9 @@ async def assign_tag(
         session.add(tag)
     else:
         _ensure_store_allowed(user, tag.store_id)
-        if target_store_id is not None:
+        if target_store_id is not None and target_store_id != tag.store_id:
             tag.store_id = target_store_id  # scanned in this store: it lives here now
+            store_moved = True
 
     tag.variation_id = body.variation_id
 
@@ -192,6 +194,9 @@ async def assign_tag(
             if (await desired_projection(session, tag))["price"] is None:
                 await session.rollback()
                 raise HTTPException(status_code=409, detail="Variable-priced items can't be shown on a label")
+        if store_moved:
+            # Unchanged content enqueues nothing below, so a queued command must follow the tag.
+            await rehome_pending(session, tag)
         await apply_desired_state(session, tag)
         await session.commit()
     except IntegrityError:

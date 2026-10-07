@@ -48,6 +48,21 @@ async def _supersede_pending(session: AsyncSession, tag: Tag, actions: tuple[str
     )
 
 
+async def rehome_pending(session: AsyncSession, tag: Tag) -> None:
+    """Point the tag's still-Pending commands at its current store (the tag moved). Does not commit.
+
+    Creates no command and never touches the version: a move with unchanged content must not
+    cost a radio write, but its queued command must reach the new store's gateway. Dispatched
+    rows stay put: the old Pi holds them and reports on them.
+    """
+    await session.execute(
+        update(LabelUpdate)
+        .where(LabelUpdate.business_id == tag.business_id, LabelUpdate.tag_id == tag.id,
+               LabelUpdate.status == "Pending", LabelUpdate.store_id != tag.store_id)
+        .values(store_id=tag.store_id)
+    )
+
+
 async def _latest_display_command(session: AsyncSession, tag: Tag) -> LabelUpdate | None:
     return (await session.execute(
         select(LabelUpdate)

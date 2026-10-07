@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from esl.auth.current_user import CurrentUser
-from esl.catalog.availability import is_available_at
+from esl.catalog.availability import available_at_clause, is_available_at
 from esl.catalog.models import CatalogItem, CatalogVariation
 from esl.catalog.pricing import store_overrides
 from esl.scan import gtin_candidates
@@ -68,7 +68,10 @@ async def list_variations(
     session: AsyncSession = Depends(get_business_session),
 ):
     store = await get_store_for_user(session, user, store_id) if store_id else None
+    location = store.square_location_id if store else None
     query = select(CatalogVariation).options(selectinload(CatalogVariation.item))
+    if location is not None:  # before the LIMIT, so a store's results aren't cut short
+        query = query.where(available_at_clause(location))
     if q and q.strip():
         pattern = _like(q.strip())
         query = (
@@ -85,9 +88,6 @@ async def list_variations(
             .limit(SEARCH_LIMIT)
         )
     rows = (await session.execute(query)).scalars().all()
-    location = store.square_location_id if store else None
-    if store:
-        rows = [v for v in rows if is_available_at(v, location)]
     overrides = await store_overrides(session, [v.id for v in rows], location)
     return VariationListResponse(variations=[_priced(v, overrides.get(v.id)) for v in rows])
 

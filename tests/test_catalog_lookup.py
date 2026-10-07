@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import text
 
 from tests.auth import bearer
-from tests.seed import BUSINESS_A, BUSINESS_B, STAFF_A_SUB, STORE_A, STORE_A2
+from tests.seed import BUSINESS_A, BUSINESS_B, STAFF_A_SUB, STORE_A, STORE_A2, STORE_B
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
@@ -87,3 +87,40 @@ async def test_name_search_priced_for_store(client):
 
 async def test_variations_without_params_unchanged(client):
     assert [v["id"] for v in (await client.get("/v1/catalog/variations")).json()["variations"]] == ["VAR_A"]
+
+
+async def _search(client, store, q="item a", **kw):
+    return await client.get("/v1/catalog/variations", params={"q": q, "store_id": str(store)}, **kw)
+
+
+async def test_name_search_uses_store_override_price(client):
+    found = (await _search(client, STORE_A2)).json()["variations"]
+    assert [(v["id"], v["price"]) for v in found] == [("VAR_A", 1200)]
+
+
+async def test_name_search_store_rules(client):
+    assert (await _search(client, STORE_A, headers=bearer(STAFF_A_SUB))).status_code == 403
+    assert (await _search(client, STORE_B)).status_code == 404  # business B's store is invisible
+
+
+async def test_name_search_limit_applies_after_availability(client, admin_session):
+    # 50 earlier-sorting matches that LOC_A2 doesn't sell must not crowd out VAR_A there.
+    await admin_session.execute(text(
+        "insert into catalog_variations (business_id, id, item_id, variation_name, price, pricing_type, "
+        "updated_at, absent_at_location_ids) "
+        "select :a, 'VAR_GONE_' || n, 'ITEM_A', 'Aaa ' || lpad(n::text, 2, '0'), 500, 'FIXED_PRICING', now(), "
+        "'{LOC_A2}' from generate_series(1, 50) n"
+    ), {"a": BUSINESS_A})
+    await admin_session.commit()
+    assert [v["id"] for v in (await _search(client, STORE_A2)).json()["variations"]] == ["VAR_A"]
+    assert len((await _search(client, STORE_A)).json()["variations"]) == 50  # still capped
+
+
+async def test_name_search_respects_present_at_location_ids(client, admin_session):
+    await admin_session.execute(text(
+        "update catalog_variations set present_at_all_locations = false, present_at_location_ids = '{LOC_A2}' "
+        "where business_id = :a and id = 'VAR_A'"
+    ), {"a": BUSINESS_A})
+    await admin_session.commit()
+    assert [v["id"] for v in (await _search(client, STORE_A2)).json()["variations"]] == ["VAR_A"]
+    assert (await _search(client, STORE_A)).json()["variations"] == []
