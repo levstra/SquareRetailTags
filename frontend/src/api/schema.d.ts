@@ -105,10 +105,32 @@ export interface paths {
         get: operations["getTag"];
         /**
          * Create or update a tag's variation assignment
-         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately; the gateway receives the change as a command. A staff member with no store access gets 403.
+         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately; the gateway receives the change as a command. A staff member with no store access gets 403, as does a user who may not use the tag's store or the given store_id. The tag is never deleted: undo a pairing by sending the previous variation_id (null for a first pair), which unassigns it and keeps it registered.
          */
         put: operations["assignTag"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tags/{tag_id}/locate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: components["schemas"]["TagId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Flash the label's LED so staff can find it on the shelf
+         * @description Queues a Locate command. It never changes the tag's version or content; a newer Locate replaces a pending one.
+         */
+        post: operations["locateTag"];
         delete?: never;
         options?: never;
         head?: never;
@@ -532,6 +554,15 @@ export interface components {
         AssignBody: {
             /** @description Variation to assign. Null to unassign. */
             variation_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Store the tag was scanned in. New tags are registered there; an existing tag moves there. Null keeps the current store (new tags go to the user's first store).
+             */
+            store_id?: string | null;
+        };
+        LocateBody: {
+            /** @default 30 */
+            seconds: number;
         };
         Health: {
             /** @enum {string} */
@@ -1101,7 +1132,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description variation_id not found in catalog */
+            /** @description variation_id not found in catalog, or store_id not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -1120,6 +1151,52 @@ export interface operations {
                 };
             };
             /** @description The tag ID is not 12 hexadecimal characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    locateTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: components["schemas"]["TagId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LocateBody"];
+            };
+        };
+        responses: {
+            /** @description Locate command queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelUpdateSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Tag not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tag ID is not 12 hexadecimal characters, or seconds is out of range */
             422: {
                 headers: {
                     [name: string]: unknown;

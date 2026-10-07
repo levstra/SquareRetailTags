@@ -181,7 +181,10 @@ paths:
         Creates the tag if it does not exist. Pass variation_id to assign a
         catalog variation; pass null to unassign. content_hash is recomputed
         immediately; the gateway receives the change as a command.
-        A staff member with no store access gets 403.
+        A staff member with no store access gets 403, as does a user who
+        may not use the tag's store or the given store_id. The tag is never
+        deleted: undo a pairing by sending the previous variation_id (null
+        for a first pair), which unassigns it and keeps it registered.
       requestBody:
         required: true
         content:
@@ -200,7 +203,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tag"
         "404":
-          description: variation_id not found in catalog
+          description: variation_id not found in catalog, or store_id not found
           content:
             application/json:
               schema:
@@ -216,6 +219,49 @@ paths:
             The tag can't be used by this business, or the variation has no
             price to show at this store (VARIABLE_PRICING). The detail says
             which; it never reveals who owns a tag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /tags/{tag_id}/locate:
+    parameters:
+      - name: tag_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/TagId"
+    post:
+      operationId: locateTag
+      summary: Flash the label's LED so staff can find it on the shelf
+      description: >
+        Queues a Locate command. It never changes the tag's version or
+        content; a newer Locate replaces a pending one.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocateBody"
+      responses:
+        "200":
+          description: Locate command queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelUpdateSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The tag ID is not 12 hexadecimal characters, or seconds is out of range
           content:
             application/json:
               schema:
@@ -978,6 +1024,23 @@ components:
           type: string
           nullable: true
           description: Variation to assign. Null to unassign.
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Store the tag was scanned in. New tags are registered there; an
+            existing tag moves there. Null keeps the current store (new tags go
+            to the user's first store).
+
+    LocateBody:
+      type: object
+      properties:
+        seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 30
 
     Health:
       type: object

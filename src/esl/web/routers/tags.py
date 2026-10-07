@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from esl.auth.current_user import CurrentUser
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation
+from esl.gateway.commands import enqueue_locate
 from esl.scan import normalize_tag_id as scan_normalize_tag_id
 from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
@@ -18,6 +19,7 @@ from esl.tags.projection import Projection
 from esl.tags.status import TagExtras, load_tag_extras
 from esl.web.deps import get_business_session, get_current_user, get_request_business_id
 from esl.web.routers.label_updates import LabelUpdateSummary, summarize
+from esl.web.stores import get_store_for_user
 
 router = APIRouter()
 
@@ -47,6 +49,11 @@ class TagListResponse(BaseModel):
 
 class AssignBody(BaseModel):
     variation_id: str | None = None
+    store_id: uuid.UUID | None = None
+
+
+class LocateBody(BaseModel):
+    seconds: int = Field(default=30, ge=1, le=300)
 
 
 def normalize_tag_id(tag_id: str) -> str:
@@ -156,15 +163,23 @@ async def assign_tag(
         if variation is None:
             raise HTTPException(status_code=404, detail=f"Variation {body.variation_id} not found")
 
+    # The store the tag was scanned in: 404 if invisible (another business), 403 if not allowed.
+    target_store_id = None
+    if body.store_id is not None:
+        target_store_id = (await get_store_for_user(session, user, body.store_id)).id
+
     tag = await session.get(Tag, tag_id)
     if tag is None:
-        store_id = await _default_store_id(session, user)
-        if store_id is None:
-            raise HTTPException(status_code=409, detail="Business has no stores")
-        tag = Tag(id=tag_id, business_id=business_id, store_id=store_id)
+        if target_store_id is None:
+            target_store_id = await _default_store_id(session, user)
+            if target_store_id is None:
+                raise HTTPException(status_code=409, detail="Business has no stores")
+        tag = Tag(id=tag_id, business_id=business_id, store_id=target_store_id)
         session.add(tag)
     else:
         _ensure_store_allowed(user, tag.store_id)
+        if target_store_id is not None:
+            tag.store_id = target_store_id  # scanned in this store: it lives here now
 
     tag.variation_id = body.variation_id
 
@@ -188,3 +203,20 @@ async def assign_tag(
     projections = await projections_for(session, [tag])
     extras = (await load_tag_extras(session, [tag])).get(tag.id)
     return _with_extras(_tag_to_response(tag, projections[tag.id]), extras)
+
+
+@router.post("/tags/{tag_id}/locate", response_model=LabelUpdateSummary)
+async def locate_tag(
+    tag_id: str,
+    body: LocateBody | None = None,
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
+):
+    tag_id = normalize_tag_id(tag_id)
+    tag = await session.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
+    _ensure_store_allowed(user, tag.store_id)
+    update = await enqueue_locate(session, tag, seconds=(body or LocateBody()).seconds)
+    await session.commit()
+    return summarize(update)
