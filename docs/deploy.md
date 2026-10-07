@@ -209,10 +209,22 @@ be backward compatible with the release that is still running (expand first,
 contract in a later release).
 
 Releases that add a synced column (e.g. `catalog_variations.gtin`, migration
-`0008`) only populate it for objects Square returns. On an existing database,
-after the new release is live, delete each business's `sync_cursors` row via
-admin to force one full sync (unchanged hashes enqueue nothing). Do not do this
-inside the migration. A first-ever sync is already full.
+`0008`) only populate it for objects Square returns in a sync after the release.
+
+- A database created at or after `0008`: nothing to do. A business's first sync
+  is a full sync, so the column is filled from the start.
+- An existing database: after the new release is live, force one full sync per
+  business by deleting its delta cursor. There is no `esl admin` subcommand for
+  this; run the SQL in a session connected as `esl_admin` (the RDS instance is
+  private, so from inside the VPC):
+
+  ```sql
+  DELETE FROM sync_cursors WHERE business_id = '<business uuid>';
+  ```
+
+  The next scheduled sync is then full. It rewrites no tags: the new column is
+  not part of the projection, so content hashes are unchanged and nothing is
+  enqueued. Do not do this inside the migration.
 
 ## Rollback
 
