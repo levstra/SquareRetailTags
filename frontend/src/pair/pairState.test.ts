@@ -38,6 +38,14 @@ describe("pairReducer", () => {
     expect(readyToPair(variable)).toBe(false);
   });
 
+  it("is not ready for a fixed-price item with no price", () => {
+    const unpriced = pairReducer(
+      pairReducer(initialPairState, { type: "tag-found", tag }),
+      { type: "product-found", matches: [{ ...product, price: null }] },
+    );
+    expect(readyToPair(unpriced)).toBe(false);
+  });
+
   it("clears", () => {
     const s = pairReducer(pairReducer(initialPairState, { type: "tag-found", tag }), { type: "clear" });
     expect(s).toEqual(initialPairState);

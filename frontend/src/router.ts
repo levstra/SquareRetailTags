@@ -17,8 +17,18 @@ export function usePath(): string {
   return useSyncExternalStore(subscribe, () => window.location.pathname);
 }
 
+function notifyAll(): void {
+  listeners.forEach((notify) => notify());
+}
+
+/** Replace the current history entry (no back-button step) and re-render usePath readers. */
+export function replacePath(path: string): void {
+  window.history.replaceState({}, document.title, path);
+  notifyAll();
+}
+
 export function navigate(path: string): void {
   if (path === window.location.pathname) return;
   window.history.pushState({}, "", path);
-  listeners.forEach((notify) => notify());
+  notifyAll();
 }

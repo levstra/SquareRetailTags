@@ -3,14 +3,22 @@ import { createDetector } from "./zxing";
 
 const REPEAT_MS = 2000; // the same code held in view is reported once per 2 s
 
-export function CameraScanner({ onScan }: { onScan: (code: string) => void }) {
+interface Props {
+  onScan: (code: string) => void;
+  // The page falls back to the handheld scanner while the camera can't be used.
+  onError?: (message: string) => void;
+}
+
+export function CameraScanner({ onScan, onError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onScanRef = useRef(onScan);
+  const onErrorRef = useRef(onError);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     onScanRef.current = onScan;
-  }, [onScan]);
+    onErrorRef.current = onError;
+  }, [onScan, onError]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -51,7 +59,10 @@ export function CameraScanner({ onScan }: { onScan: (code: string) => void }) {
         };
         void tick();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Camera unavailable");
+        if (stopped) return;
+        const message = e instanceof Error ? e.message : "Camera unavailable";
+        setError(message);
+        onErrorRef.current?.(message);
       }
     };
     void start();

@@ -7,6 +7,7 @@ import "./index.css";
 import { RequireAuth } from "./auth/RequireAuth";
 import { userManager } from "./auth/userManager";
 import { Root } from "./Root";
+import { replacePath } from "./router";
 
 const queryClient = new QueryClient();
 
@@ -14,7 +15,7 @@ const queryClient = new QueryClient();
 const onSigninCallback = (user: User | undefined) => {
   const returnTo = (user?.state as { returnTo?: string } | undefined)?.returnTo;
   const safe = returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") && returnTo !== "/auth/callback";
-  window.history.replaceState({}, document.title, safe ? returnTo : "/");
+  replacePath(safe ? returnTo : "/");
 };
 
 createRoot(document.getElementById("root")!).render(

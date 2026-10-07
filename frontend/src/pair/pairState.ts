@@ -53,6 +53,7 @@ export function readyToPair(state: PairState): boolean {
     state.product !== null &&
     state.tag !== null &&
     state.tag.status !== "other-store" &&
-    state.product.pricingType !== "VARIABLE_PRICING"
+    state.product.pricingType !== "VARIABLE_PRICING" &&
+    state.product.price !== null // the server refuses a label without a price
   );
 }

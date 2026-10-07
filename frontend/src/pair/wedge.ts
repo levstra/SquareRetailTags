@@ -6,6 +6,11 @@ export class WedgeBuffer {
   private chars = "";
   private last = Number.NEGATIVE_INFINITY;
 
+  /** A key arriving now continues a scanner burst (a character came within the gap). */
+  inBurst(nowMs: number): boolean {
+    return this.chars.length > 0 && nowMs - this.last <= WEDGE_MAX_GAP_MS;
+  }
+
   push(key: string, nowMs: number): string | null {
     if (key === "Enter") {
       const code = this.chars;

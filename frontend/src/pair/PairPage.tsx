@@ -1,10 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { components } from "../api/schema.d.ts";
 import { navigate } from "../router";
 import { CameraScanner } from "./CameraScanner";
-import { beep, vibrate } from "./feedback";
+import { beep, unlockAudioOnFirstGesture, vibrate } from "./feedback";
 import { formatPrice } from "./format";
 import { initialPairState, pairReducer, readyToPair, type ProductChoice, type TagSlot } from "./pairState";
 import { statusMessage, type Tone } from "./statusMessages";
@@ -35,7 +35,7 @@ function errorText(e: unknown): string {
 }
 
 function UpdateStatus({ initial }: { initial: Summary }) {
-  const { data } = useQuery({
+  const { data, isError, error } = useQuery({
     queryKey: ["label-update", initial.update_id],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/label-updates/{update_id}", {
@@ -45,8 +45,13 @@ function UpdateStatus({ initial }: { initial: Summary }) {
       return data;
     },
     initialData: initial,
-    refetchInterval: (q) => (q.state.data && statusMessage(q.state.data).final ? false : 2000),
+    // Stop on a final status, and on a persistent error rather than polling it forever.
+    refetchInterval: (q) =>
+      q.state.status === "error" || (q.state.data && statusMessage(q.state.data).final) ? false : 2000,
   });
+  if (isError) {
+    return <p className={`rounded px-3 py-2 text-sm ${TONES.error}`}>Couldn't check this label: {errorText(error)}</p>;
+  }
   const m = statusMessage(data ?? initial);
   return <p className={`rounded px-3 py-2 text-sm ${TONES[m.tone]}`}>{m.text}</p>;
 }
@@ -79,11 +84,17 @@ export function PairPage() {
   const [chosenStore, setChosenStore] = useState<string | null>(() => getLastStore());
   const storeList = stores.data ?? [];
   const storeId = storeList.find((s) => s.id === chosenStore)?.id ?? storeList[0]?.id ?? null;
+  // Responses that started under another store (or for another tag) are dropped on arrival.
+  const storeIdRef = useRef(storeId);
+  useEffect(() => {
+    storeIdRef.current = storeId;
+  }, [storeId]);
 
   const [state, dispatch] = useReducer(pairReducer, initialPairState);
   // pairState treats "no matches" like "nothing scanned"; the page remembers the code to say so.
   const [notFound, setNotFound] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(true);
+  const [cameraFailed, setCameraFailed] = useState(false);
   const [notice, setNotice] = useState<{ tone: Tone; text: string } | null>(null);
   const [flash, setFlash] = useState(false);
   const [lastPair, setLastPair] = useState<LastPair | null>(null);
@@ -104,6 +115,13 @@ export function PairPage() {
       return data.labels;
     },
   });
+  const tagIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    tagIdRef.current = state.tag?.tagId ?? null;
+  }, [state.tag]);
+
+  useEffect(() => unlockAudioOnFirstGesture(), []);
+
   const heard = useMemo(
     () => (labels.data ? new Set(labels.data.map((l) => l.tag_id)) : null),
     [labels.data],
@@ -138,8 +156,9 @@ export function PairPage() {
     setLocate(null);
   };
 
-  const loadTag = useCallback(async (tagId: string) => {
+  const loadTag = useCallback(async (tagId: string, store: string) => {
     const { data, response } = await api.GET("/tags/{tag_id}", { params: { path: { tag_id: tagId } } });
+    if (store !== storeIdRef.current) return; // the store changed while this was in flight
     // Until the store's label list loads, don't warn about the gateway.
     const seenByGateway = heard === null || heard.has(tagId);
     const blank = { tagId, currentName: null, previousVariationId: null, previousStoreId: null, seenByGateway };
@@ -163,6 +182,7 @@ export function PairPage() {
 
   const loadProduct = useCallback(async (code: string, store: string) => {
     const { data, error, response } = await api.GET("/catalog/lookup", { params: { query: { code, store_id: store } } });
+    if (store !== storeIdRef.current) return; // priced for the old store: drop it
     if (!data) return fail(errorText(new ApiError(response, error)));
     dispatch({ type: "product-found", matches: data.matches.map(toChoice) });
     if (data.matches.length === 0) {
@@ -178,19 +198,22 @@ export function PairPage() {
   const handleScan = useCallback(async (raw: string) => {
     setNotice(null);
     if (!storeId) return fail("Pick a store first");
+    const store = storeId;
     try {
       const { data, error, response } = await api.GET("/scan/classify", {
-        params: { query: { code: raw, store_id: storeId } },
+        params: { query: { code: raw, store_id: store } },
       });
+      if (store !== storeIdRef.current) return;
       if (!data) return fail(errorText(new ApiError(response, error)));
-      if (data.kind === "tag") await loadTag(data.normalized);
-      else await loadProduct(data.normalized, storeId);
+      if (data.kind === "tag") await loadTag(data.normalized, store);
+      else await loadProduct(data.normalized, store);
     } catch (e) {
       fail(errorText(e)); // network failure
     }
   }, [storeId, loadTag, loadProduct, fail]);
 
-  useWedge(!cameraOn, handleScan);
+  // The handheld scanner works whenever the camera doesn't: off, or failed to start.
+  useWedge(!cameraOn || cameraFailed, handleScan);
 
   const pair = useMutation({
     mutationFn: async ({ tag, product, storeId }: PairRequest) => {
@@ -253,7 +276,9 @@ export function PairPage() {
       if (!data) throw new ApiError(response, error);
       return data;
     },
-    onSuccess: (data) => setLocate(data),
+    onSuccess: (data, tagId) => {
+      if (tagId === tagIdRef.current) setLocate(data); // the user may have scanned another tag meanwhile
+    },
     onError: (e) => fail(errorText(e)),
   });
 
@@ -270,9 +295,12 @@ export function PairPage() {
           className="max-w-[60%] rounded border border-gray-300 px-2 py-1 text-sm"
           value={storeId ?? ""}
           onChange={(e) => {
+            storeIdRef.current = e.target.value;
             setChosenStore(e.target.value);
             setLastStore(e.target.value);
             clearSlots();
+            // Focused, the select would take scanner characters as type-ahead and switch store.
+            e.currentTarget.blur();
           }}
         >
           {storeList.map((s) => (
@@ -284,7 +312,13 @@ export function PairPage() {
       <main className="mx-auto max-w-md space-y-4 p-4">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">Pair tags</h1>
-          <button className="text-sm underline" onClick={() => setCameraOn((on) => !on)}>
+          <button
+            className="text-sm underline"
+            onClick={() => {
+              setCameraOn((on) => !on);
+              setCameraFailed(false); // turning the camera back on retries it
+            }}
+          >
             {cameraOn ? "Use handheld scanner" : "Use camera"}
           </button>
         </div>
@@ -296,7 +330,7 @@ export function PairPage() {
           <p className="rounded bg-amber-50 p-3 text-sm text-amber-800">You don't have access to any store.</p>
         )}
 
-        {cameraOn && storeId && <CameraScanner onScan={handleScan} />}
+        {cameraOn && storeId && <CameraScanner onScan={handleScan} onError={() => setCameraFailed(true)} />}
         {!cameraOn && (
           <p className="rounded bg-gray-50 p-3 text-sm text-gray-600">Ready for the handheld scanner.</p>
         )}
@@ -328,8 +362,10 @@ export function PairPage() {
                 <p className="font-medium">{product.name}</p>
                 {product.variationName !== "Regular" && <p className="text-sm text-gray-600">{product.variationName}</p>}
                 <p className="text-lg font-semibold">{formatPrice(product.price, product.currency)}</p>
-                {product.pricingType === "VARIABLE_PRICING" && (
+                {product.pricingType === "VARIABLE_PRICING" ? (
                   <p className="text-sm text-red-600">Variable-price items can't be shown on a label.</p>
+                ) : product.price === null && (
+                  <p className="text-sm text-red-600">This item has no price, so it can't be shown on a label.</p>
                 )}
               </>
             ) : choices.length > 0 ? (

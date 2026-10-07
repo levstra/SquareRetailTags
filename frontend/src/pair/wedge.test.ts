@@ -15,6 +15,17 @@ function type(buffer: WedgeBuffer, text: string, start: number, gap: number): st
 }
 
 describe("WedgeBuffer", () => {
+  it("knows when a key continues a burst, so the page can swallow it", () => {
+    const b = new WedgeBuffer();
+    expect(b.inBurst(0)).toBe(false); // the first key can't be told apart from a human's
+    const enterAt = typeKeys(b, "8400", 0, 10);
+    expect(b.inBurst(enterAt)).toBe(true); // ...the terminating Enter included
+    b.push("Enter", enterAt);
+    expect(b.inBurst(enterAt + 5)).toBe(false);
+    b.push("x", 1000);
+    expect(b.inBurst(1000 + 200)).toBe(false); // human-speed typing is never swallowed
+  });
+
   it("emits a fast burst ending in Enter", () => {
     expect(type(new WedgeBuffer(), "840001262D51", 0, 10)).toBe("840001262D51");
   });
