@@ -47,13 +47,15 @@ def square_override(location_id: str, price: int | None = None, pricing_type: st
 
 
 def square_variation(var_id: str, name: str, price: int | None, *, sku: str | None = None,
-                     pricing_type: str = "FIXED_PRICING", overrides: tuple = (),
+                     upc: str | None = None, pricing_type: str = "FIXED_PRICING", overrides: tuple = (),
                      present_at_all_locations: bool = True,
                      present_at_location_ids: list[str] | None = None,
                      absent_at_location_ids: list[str] | None = None) -> dict:
     data: dict = {"name": name, "pricing_type": pricing_type, "location_overrides": list(overrides)}
     if sku is not None:
         data["sku"] = sku
+    if upc is not None:
+        data["upc"] = upc
     if price is not None:
         data["price_money"] = {"amount": price, "currency": "USD"}
     variation: dict = {"type": "ITEM_VARIATION", "id": var_id, "updated_at": "2026-10-04T11:00:00.000Z",

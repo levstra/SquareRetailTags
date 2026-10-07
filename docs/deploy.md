@@ -208,6 +208,12 @@ from `:candidate`, promotes `:prod`, and waits for App Runner. Migrations must
 be backward compatible with the release that is still running (expand first,
 contract in a later release).
 
+Releases that add a synced column (e.g. `catalog_variations.gtin`, migration
+`0008`) only populate it for objects Square returns. On an existing database,
+after the new release is live, delete each business's `sync_cursors` row via
+admin to force one full sync (unchanged hashes enqueue nothing). Do not do this
+inside the migration. A first-ever sync is already full.
+
 ## Rollback
 
 If a deploy run went red after the "Promote to :prod and deploy" step and CI

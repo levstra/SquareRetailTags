@@ -30,6 +30,8 @@ class CatalogVariation(Base):
             name="catalog_variations_item_fkey",
         ),
         Index("catalog_variations_item_id", "business_id", "item_id"),
+        Index("catalog_variations_business_gtin", "business_id", "gtin"),
+        Index("catalog_variations_business_sku", "business_id", "sku"),
     )
 
     business_id: Mapped[uuid.UUID] = mapped_column(
@@ -39,6 +41,9 @@ class CatalogVariation(Base):
     item_id: Mapped[str] = mapped_column(Text, nullable=False)
     variation_name: Mapped[str] = mapped_column(Text, nullable=False)
     sku: Mapped[str | None] = mapped_column(Text)
+    # Square's `upc` field (any GTIN: UPC-A, EAN-13, EAN-8, GTIN-14). Used by
+    # scan lookup only; deliberately NOT part of the tag projection.
+    gtin: Mapped[str | None] = mapped_column(Text)
     price: Mapped[int | None] = mapped_column(Integer)
     pricing_type: Mapped[str] = mapped_column(Text, nullable=False)
     currency: Mapped[str | None] = mapped_column(Text)  # ISO 4217, from Square price_money
