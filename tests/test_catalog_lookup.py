@@ -80,8 +80,9 @@ async def test_restricted_staff_cannot_look_up_other_store(client):
 async def test_name_search_priced_for_store(client):
     found = (await client.get("/v1/catalog/variations", params={"q": "item a", "store_id": str(STORE_A)})).json()
     assert [v["id"] for v in found["variations"]] == ["VAR_A"]
-    none = (await client.get("/v1/catalog/variations", params={"q": "100%_", "store_id": str(STORE_A)})).json()
-    assert none["variations"] == []  # LIKE wildcards are escaped
+    for wildcard in ("_", "%"):  # unescaped, each would match every row
+        none = (await client.get("/v1/catalog/variations", params={"q": wildcard, "store_id": str(STORE_A)})).json()
+        assert none["variations"] == []  # LIKE wildcards are escaped
 
 
 async def test_variations_without_params_unchanged(client):

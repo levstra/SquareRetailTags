@@ -1,13 +1,12 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.auth.current_user import CurrentUser
-from esl.businesses.models import Store
 from esl.gateway.models import AccessPointStatus, Gateway, LabelTelemetry
 from esl.tags.models import Tag
 from esl.web.deps import get_business_session, get_current_user, require_owner
