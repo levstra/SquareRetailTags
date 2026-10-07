@@ -39,7 +39,24 @@ paths:
     get:
       operationId: listVariations
       summary: List all catalog variations for tag assignment
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive search on item name, variation name or SKU (max 50 results).
+          schema: { type: string }
+        - name: store_id
+          in: query
+          required: false
+          description: Only variations available at this store, priced for it.
+          schema: { type: string, format: uuid }
       responses:
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -50,6 +67,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VariationList"
+
+  /scan/classify:
+    get:
+      operationId: classifyScan
+      summary: Decide whether a scanned code is a shelf tag or a product
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: store_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Classification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClassifyResult" }
+        "400":
+          description: Empty scan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /catalog/lookup:
+    get:
+      operationId: lookupProduct
+      summary: Find variations by scanned GTIN, then SKU, available at a store
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: store_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Zero or more matches, priced for the store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupResult" }
+        "400":
+          description: Empty code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /tags:
     get:
@@ -846,6 +915,51 @@ components:
         pricing_type:
           type: string
           enum: [FIXED_PRICING, VARIABLE_PRICING]
+        gtin:
+          type: string
+          nullable: true
+          description: Square's UPC/GTIN field.
+        currency:
+          type: string
+          nullable: true
+
+    ClassifyResult:
+      type: object
+      required: [kind, normalized]
+      properties:
+        kind:
+          type: string
+          enum: [tag, product]
+        normalized:
+          type: string
+          description: The 12-hex tag ID for tags; the trimmed code for products.
+
+    VariationWithStorePrice:
+      type: object
+      required: [id, item_id, name, variation_name, pricing_type]
+      properties:
+        id: { type: string }
+        item_id: { type: string }
+        name: { type: string }
+        variation_name: { type: string }
+        sku: { type: string, nullable: true }
+        gtin: { type: string, nullable: true }
+        price:
+          type: integer
+          nullable: true
+          description: Price at this store in the smallest currency unit. Null when VARIABLE_PRICING.
+        pricing_type:
+          type: string
+          enum: [FIXED_PRICING, VARIABLE_PRICING]
+        currency: { type: string, nullable: true }
+
+    LookupResult:
+      type: object
+      required: [matches]
+      properties:
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/VariationWithStorePrice" }
 
     VariationList:
       type: object

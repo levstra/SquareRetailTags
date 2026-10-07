@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/scan/classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decide whether a scanned code is a shelf tag or a product */
+        get: operations["classifyScan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Find variations by scanned GTIN, then SKU, available at a store */
+        get: operations["lookupProduct"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tags": {
         parameters: {
             query?: never;
@@ -466,6 +500,31 @@ export interface components {
             price?: number | null;
             /** @enum {string} */
             pricing_type: "FIXED_PRICING" | "VARIABLE_PRICING";
+            /** @description Square's UPC/GTIN field. */
+            gtin?: string | null;
+            currency?: string | null;
+        };
+        ClassifyResult: {
+            /** @enum {string} */
+            kind: "tag" | "product";
+            /** @description The 12-hex tag ID for tags; the trimmed code for products. */
+            normalized: string;
+        };
+        VariationWithStorePrice: {
+            id: string;
+            item_id: string;
+            name: string;
+            variation_name: string;
+            sku?: string | null;
+            gtin?: string | null;
+            /** @description Price at this store in the smallest currency unit. Null when VARIABLE_PRICING. */
+            price?: number | null;
+            /** @enum {string} */
+            pricing_type: "FIXED_PRICING" | "VARIABLE_PRICING";
+            currency?: string | null;
+        };
+        LookupResult: {
+            matches: components["schemas"]["VariationWithStorePrice"][];
         };
         VariationList: {
             variations: components["schemas"]["Variation"][];
@@ -832,7 +891,12 @@ export interface operations {
     };
     listVariations: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive search on item name, variation name or SKU (max 50 results). */
+                q?: string;
+                /** @description Only variations available at this store, priced for it. */
+                store_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -850,6 +914,101 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    classifyScan: {
+        parameters: {
+            query: {
+                code: string;
+                store_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Classification */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassifyResult"];
+                };
+            };
+            /** @description Empty scan */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    lookupProduct: {
+        parameters: {
+            query: {
+                code: string;
+                store_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zero or more matches, priced for the store */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookupResult"];
+                };
+            };
+            /** @description Empty code */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listTags: {

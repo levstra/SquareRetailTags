@@ -11,6 +11,7 @@ from esl.businesses.models import Store
 from esl.gateway.models import AccessPointStatus, Gateway, LabelTelemetry
 from esl.tags.models import Tag
 from esl.web.deps import get_business_session, get_current_user, require_owner
+from esl.web.stores import get_store_for_user
 
 router = APIRouter()
 
@@ -49,22 +50,13 @@ class StoreGateways(BaseModel):
     access_points: list[AccessPointOut]
 
 
-async def _store(session: AsyncSession, user: CurrentUser, store_id: uuid.UUID) -> Store:
-    store = await session.get(Store, store_id)
-    if store is None:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if not user.can_use_store(store_id):
-        raise HTTPException(status_code=403, detail="You don't have access to this store")
-    return store
-
-
 @router.get("/stores/{store_id}/labels", response_model=StoreLabelList)
 async def list_store_labels(
     store_id: uuid.UUID,
     user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_business_session),
 ):
-    await _store(session, user, store_id)
+    await get_store_for_user(session, user, store_id)
     rows = (await session.execute(
         select(LabelTelemetry, Tag.variation_id)
         # Store too: a tag paired in another store of this business isn't assigned here.
@@ -86,7 +78,7 @@ async def list_store_gateways(
     owner: CurrentUser = Depends(require_owner),
     session: AsyncSession = Depends(get_business_session),
 ):
-    await _store(session, owner, store_id)
+    await get_store_for_user(session, owner, store_id)
     gateways = (await session.execute(
         select(Gateway).where(Gateway.store_id == store_id).order_by(Gateway.created_at)
     )).scalars().all()
