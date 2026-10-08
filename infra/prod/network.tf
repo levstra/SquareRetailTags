@@ -105,3 +105,15 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.apprunner.id, aws_security_group.tasks.id]
   }
 }
+
+resource "aws_subnet" "rds_extra" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 12)
+  availability_zone = "${var.region}c"
+  tags              = { Name = "${local.name}-rds-extra" }
+}
+
+resource "aws_route_table_association" "rds_extra" {
+  subnet_id      = aws_subnet.rds_extra.id
+  route_table_id = aws_route_table.private.id
+}

@@ -1,6 +1,6 @@
 resource "aws_db_subnet_group" "main" {
   name       = local.name
-  subnet_ids = aws_subnet.private[*].id
+  subnet_ids = concat(aws_subnet.private[*].id, [aws_subnet.rds_extra.id])
 }
 
 resource "aws_db_parameter_group" "pg16" {
@@ -37,4 +37,5 @@ resource "aws_db_instance" "main" {
   deletion_protection         = true
   skip_final_snapshot         = false
   final_snapshot_identifier   = "${local.name}-final"
+  availability_zone           = "${var.region}c"
 }
