@@ -152,8 +152,8 @@ Uses the `gh` CLI. Merging to `main` before this step produces one red
 
 ```powershell
 # Restrict the environment to main; the OIDC trust on environment:production then only works from main.
-gh api -X PUT "repos/estrellaSMC/SquareRetailTags/environments/production" -F "deployment_branch_policy[protected_branches]=false" -F "deployment_branch_policy[custom_branch_policies]=true" | Out-Null
-gh api -X POST "repos/estrellaSMC/SquareRetailTags/environments/production/deployment-branch-policies" -f name=main | Out-Null
+gh api -X PUT "repos/levstra/SquareRetailTags/environments/production" -F "deployment_branch_policy[protected_branches]=false" -F "deployment_branch_policy[custom_branch_policies]=true" | Out-Null
+gh api -X POST "repos/levstra/SquareRetailTags/environments/production/deployment-branch-policies" -f name=main | Out-Null
 $o = terraform -chdir=infra/prod output -json | ConvertFrom-Json
 $vars = @{
   AWS_REGION = $o.region.value
@@ -296,7 +296,7 @@ changes), and once after migrating an existing database to `0006`.
 - Losing `infra/bootstrap`'s local state file is recoverable: `terraform import`
   the four bucket resources (the bucket has `prevent_destroy`).
 - The GitHub OIDC trust is case-sensitive on the repository name
-  (`estrellaSMC/SquareRetailTags`).
+  (`levstra/SquareRetailTags`).
 
 ## Costs (~$40/mo)
 

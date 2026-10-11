@@ -1036,7 +1036,7 @@ variable "alarm_email" {
 
 variable "github_repository" {
   type    = string
-  default = "estrellaSMC/SquareRetailTags"
+  default = "levstra/SquareRetailTags"
 }
 
 variable "create_github_oidc_provider" {
@@ -2595,7 +2595,7 @@ Expected: `{"status":"ok"}`; `200 text/html; charset=utf-8`; `401` (signed out).
 - [ ] **Step 11: GitHub environment and variables** (confirm first; uses the `gh` CLI)
 
 ```powershell
-gh api -X PUT "repos/estrellaSMC/SquareRetailTags/environments/production" | Out-Null
+gh api -X PUT "repos/levstra/SquareRetailTags/environments/production" | Out-Null
 $o = terraform -chdir=infra/prod output -json | ConvertFrom-Json
 $vars = @{
   AWS_REGION = $o.region.value

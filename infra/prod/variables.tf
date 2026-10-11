@@ -34,7 +34,7 @@ variable "alarm_email" {
 
 variable "github_repository" {
   type    = string
-  default = "estrellaSMC/SquareRetailTags"
+  default = "levstra/SquareRetailTags"
 }
 
 variable "create_github_oidc_provider" {
