@@ -76,10 +76,10 @@ export function CameraScanner({ onScan, onError }: Props) {
 
   if (error) {
     return (
-      <p className="rounded bg-amber-50 p-3 text-sm text-amber-800">
+      <p className="rounded-lg bg-warn-tint p-3 text-sm text-warn">
         Camera unavailable ({error}). Use a handheld scanner or type the code below.
       </p>
     );
   }
-  return <video ref={videoRef} playsInline muted className="aspect-video w-full rounded bg-black object-cover" />;
+  return <video ref={videoRef} playsInline muted className="aspect-video w-full rounded-xl bg-black object-cover" />;
 }

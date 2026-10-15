@@ -460,8 +460,20 @@ export interface components {
             latest_update?: components["schemas"]["LabelUpdateSummary"] | null;
             /** @description From the store Pi's telemetry; null if the Pi has never reported this tag. */
             low_battery?: boolean | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Last time any access point heard this label.
+             */
             last_seen_at?: string | null;
+            /**
+             * @description Whether the store's access points can currently hear this label, derived from Pi telemetry. `never_heard` means no access point has ever listed it, usually a tag id that matches no real hardware. `out_of_range` means heard once but not within the last hour. `weak` means heard recently at -70 dBm or worse.
+             * @enum {string}
+             */
+            signal: "ok" | "weak" | "out_of_range" | "never_heard";
+            /** @description Last reported signal strength in dBm. Null if never heard. */
+            rf_power?: number | null;
+            /** @description Battery reading in volts, from the raw tenths-of-a-volt byte the hardware reports. Not a percentage; no discharge curve is assumed. */
+            battery_volts?: number | null;
         };
         LabelUpdateSummary: {
             /** Format: uuid */

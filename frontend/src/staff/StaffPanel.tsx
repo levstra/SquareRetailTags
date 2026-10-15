@@ -2,6 +2,7 @@ import { useMutation, useMutationState, useQuery, useQueryClient } from "@tansta
 import { useState } from "react";
 import { api } from "../api/client";
 import type { components } from "../api/schema.d.ts";
+import { Button, Field, StatusLabel, TextInput } from "../ui";
 
 type StaffUser = components["schemas"]["StaffUser"];
 type Store = components["schemas"]["Store"];
@@ -37,7 +38,7 @@ function StoreChecklist({
   const none = !access.all_stores && access.store_ids.length === 0;
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <label className="flex items-center gap-1 text-sm">
+      <label className="flex min-h-10 items-center gap-1.5 text-sm text-ink">
         <input
           type="checkbox"
           checked={access.all_stores}
@@ -47,7 +48,7 @@ function StoreChecklist({
         All stores
       </label>
       {stores.map((s) => (
-        <label key={s.id} className="flex items-center gap-1 text-sm">
+        <label key={s.id} className="flex min-h-10 items-center gap-1.5 text-sm text-ink">
           <input
             type="checkbox"
             checked={specific.includes(s.id)}
@@ -62,7 +63,7 @@ function StoreChecklist({
           {s.name}
         </label>
       ))}
-      {none && <span className="text-sm text-amber-700">No store access</span>}
+      {none && <span className="text-sm font-semibold text-warn">No store access</span>}
     </div>
   );
 }
@@ -130,79 +131,82 @@ export function StaffPanel() {
   const allStores = stores.data ?? [];
 
   return (
-    <section className="space-y-6">
+    <section>
+      <h1 className="text-3xl font-bold tracking-tight text-ink">Staff</h1>
+      <p className="mt-1.5 mb-7 text-[15px] text-muted">
+        Who can sign in, and which stores they can work in.
+      </p>
+
       <form
-        className="space-y-2 rounded border border-gray-200 p-4"
+        className="mb-7 flex flex-col gap-3.5 rounded-xl border border-line bg-surface p-5"
         onSubmit={(e) => {
           e.preventDefault();
           invite.mutate();
         }}
       >
-        <h2 className="font-medium">Invite staff</h2>
-        <input
-          type="email"
-          required
-          placeholder="name@example.com"
-          className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <h2 className="text-xs font-bold tracking-wider text-muted uppercase">Invite staff</h2>
+        <Field label="Email" hint="They get an email with a temporary password">
+          <TextInput
+            type="email"
+            required
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </Field>
         <StoreChecklist stores={allStores} access={inviteAccess} onChange={setInviteAccess} />
-        <button
-          type="submit"
-          disabled={invite.isPending}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" className="self-start" disabled={invite.isPending}>
           {invite.isPending ? "Sending…" : "Send invite"}
-        </button>
+        </Button>
       </form>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-4 rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">{error}</p>}
       {(staff.error || stores.error) && (
-        <p className="text-sm text-red-600">{message(staff.error ?? stores.error)}</p>
+        <p className="mb-4 rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">
+          {message(staff.error ?? stores.error)}
+        </p>
       )}
 
-      <table className="w-full text-sm">
-        <thead className="text-left text-gray-500">
-          <tr>
-            <th className="py-2">Email</th>
-            <th>Role</th>
-            <th>Stores</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {(staff.data ?? []).map((u: StaffUser) => (
-            <tr key={u.id} className={`border-t border-gray-100 ${u.disabled ? "text-gray-400" : ""}`}>
-              <td className="py-2">{u.email}</td>
-              <td>{u.role}</td>
-              <td>
-                {u.role === "owner" ? (
-                  <span className="text-gray-400">All stores</span>
-                ) : (
-                  <StoreChecklist
-                    stores={allStores}
-                    access={{ all_stores: u.all_stores, store_ids: u.store_ids }}
-                    disabled={pendingIds.has(u.id)}
-                    onChange={(access) => update.mutate({ id: u.id, body: access })}
-                  />
-                )}
-              </td>
-              <td className="text-right">
-                {u.role === "staff" && (
-                  <button
-                    className="text-sm underline disabled:opacity-50"
-                    disabled={pendingIds.has(u.id)}
-                    onClick={() => update.mutate({ id: u.id, body: { disabled: !u.disabled } })}
-                  >
-                    {u.disabled ? "Enable" : "Disable"}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <ul className="flex list-none flex-col gap-2 p-0">
+        {(staff.data ?? []).map((u: StaffUser) => (
+          <li
+            key={u.id}
+            className={`rounded-xl border border-line-soft bg-surface p-4 ${u.disabled ? "opacity-60" : ""}`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2">
+              <div className="min-w-0">
+                <p className="text-[15px] font-medium text-ink">{u.email}</p>
+                <p className="mt-0.5 text-xs text-faint">
+                  {u.role}
+                  {u.disabled ? " · disabled" : ""}
+                </p>
+              </div>
+              {u.role === "staff" && (
+                <Button
+                  variant="quiet"
+                  className={u.disabled ? "" : "text-bad"}
+                  disabled={pendingIds.has(u.id)}
+                  onClick={() => update.mutate({ id: u.id, body: { disabled: !u.disabled } })}
+                >
+                  {u.disabled ? "Enable" : "Disable"}
+                </Button>
+              )}
+            </div>
+            <div className="mt-2.5">
+              {u.role === "owner" ? (
+                <StatusLabel tone="idle">All stores</StatusLabel>
+              ) : (
+                <StoreChecklist
+                  stores={allStores}
+                  access={{ all_stores: u.all_stores, store_ids: u.store_ids }}
+                  disabled={pendingIds.has(u.id)}
+                  onChange={(access) => update.mutate({ id: u.id, body: access })}
+                />
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

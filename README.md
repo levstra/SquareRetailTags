@@ -1,33 +1,39 @@
 # ESL Pricing Service
 
 A service that keeps electronic shelf labels (ESLs) in sync with prices in
-Square. It reads catalog data from Square, decides what each shelf tag
-should display, and hands that "desired state" off to a Raspberry Pi
-gateway, which is the only thing that actually talks to the tag hardware.
+Square, across multiple stores. It reads catalog data from Square, decides
+what each shelf tag should display, and hands that "desired state" off to
+each store's Raspberry Pi gateway, which is the only thing that actually
+talks to that store's tag hardware.
 
 ## How it fits together
 
 ```
-Square (source of truth for price)
+Square (source of truth for price, all locations)
    │  read-only sync
    ▼
-ESL Pricing Service  ──commands──►  Store Pi (WestgateLabels)  ──radio──►  Shelf tags
-(this repo)          ◄──status, telemetry──
+ESL Pricing Service  ──commands──►  Store A's Pi (WestgateLabels)  ──radio──►  Store A's tags
+(this repo, central) ◄──status, telemetry──
+
+                     ──commands──►  Store B's Pi (WestgateLabels)  ──radio──►  Store B's tags
+                     ◄──status, telemetry──
 ```
 
 - **Square** owns the price. This service never writes to Square — it only
   reads the catalog via `SearchCatalogObjects`, using a persisted sync
-  cursor so it only pulls what changed since the last sync.
-- **This service** owns what each tag *should* display. It projects the
-  relevant Square fields (name, variation, sku, price, pricing type) into a
-  `Tag` record and computes a deterministic `content_hash` of that
-  projection. When the hash changes, it queues one versioned label command
-  for the store's Pi.
-- **The Pi gateway** (`WestgateLabels`) long-polls this service for label
-  commands (`Update`, `Unassign`, `Locate`), drives the tags through its
-  access points, and reports each command's outcome plus label and access
-  point telemetry. It never sees `content_hash`; this service turns hash
-  changes into versioned commands.
+  cursor so it only pulls what changed since the last sync. Square lets a
+  price be overridden per location; this service resolves that per store.
+- **This service** owns what each tag *should* display, for the store it
+  belongs to. It projects the relevant Square fields (name, variation, sku,
+  store-resolved price, pricing type) into a `Tag` record and computes a
+  deterministic `content_hash` of that projection. When the hash changes, it
+  queues one versioned label command for that store's Pi.
+- **Each store's Pi gateway** (`WestgateLabels`) long-polls this service for
+  its store's label commands (`Update`, `Unassign`, `Locate`), drives the tags
+  through its access points, and reports each command's outcome plus label
+  and access point telemetry. It never sees `content_hash`; this service
+  turns hash changes into versioned commands. This service never calls the
+  Pi: the Pi's own API is store-LAN-only, so the store always polls.
 
 A webhook from Square (`catalog.version.updated`) can also trigger a sync
 immediately instead of waiting for the next scheduled poll.
@@ -44,6 +50,7 @@ immediately instead of waiting for the next scheduled poll.
 | `src/esl/web/` | FastAPI app — the HTTP contract described below |
 | `frontend/` | React/Vite admin UI for assigning variations to tags |
 | `api/esl-pricing-api.yaml` | OpenAPI for this service (dashboard + the gateway section copied from the Pi contract) |
+| `api/westgate-store-service.yaml` | Reference copy of the Pi's own store-LAN API (not called by this service). Incomplete: some referenced schemas are missing; the Pi's repo is authoritative |
 
 ## Running it locally
 

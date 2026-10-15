@@ -1,8 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Lightbulb } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { components } from "../api/schema.d.ts";
 import { navigate } from "../router";
+import { Button, TextInput } from "../ui";
 import { CameraScanner } from "./CameraScanner";
 import { beep, unlockAudioOnFirstGesture, vibrate } from "./feedback";
 import { formatPrice } from "./format";
@@ -17,10 +19,10 @@ type Summary = components["schemas"]["LabelUpdateSummary"];
 
 const UNDO_MS = 8000;
 const TONES: Record<Tone, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  success: "bg-green-100 text-green-800",
-  warning: "bg-amber-100 text-amber-800",
-  error: "bg-red-100 text-red-700",
+  pending: "bg-surface-2 text-muted",
+  success: "bg-ok-tint text-ok",
+  warning: "bg-warn-tint text-warn",
+  error: "bg-bad-tint text-bad",
 };
 
 function toChoice(v: CatalogVariation): ProductChoice {
@@ -50,10 +52,10 @@ function UpdateStatus({ initial }: { initial: Summary }) {
       q.state.status === "error" || (q.state.data && statusMessage(q.state.data).final) ? false : 2000,
   });
   if (isError) {
-    return <p className={`rounded px-3 py-2 text-sm ${TONES.error}`}>Couldn't check this label: {errorText(error)}</p>;
+    return <p className={`rounded-lg px-3 py-2 text-sm ${TONES.error}`}>Couldn't check this label: {errorText(error)}</p>;
   }
   const m = statusMessage(data ?? initial);
-  return <p className={`rounded px-3 py-2 text-sm ${TONES[m.tone]}`}>{m.text}</p>;
+  return <p className={`rounded-lg px-3 py-2 text-sm ${TONES[m.tone]}`}>{m.text}</p>;
 }
 
 interface PairRequest {
@@ -285,14 +287,14 @@ export function PairPage() {
   const { product, choices, tag } = state;
 
   return (
-    <div className={`min-h-screen transition-colors ${flash ? "bg-green-50" : "bg-white"}`}>
-      <header className="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3">
-        <button className="text-sm text-gray-600 underline" onClick={() => navigate("/")}>
+    <div className={`min-h-screen transition-colors ${flash ? "bg-ok-tint" : "bg-canvas"}`}>
+      <header className="flex items-center justify-between gap-2 border-b border-line-soft px-4 py-3">
+        <Button variant="quiet" className="-ml-2" onClick={() => navigate("/")}>
           ← Dashboard
-        </button>
+        </Button>
         <select
           aria-label="Store"
-          className="max-w-[60%] rounded border border-gray-300 px-2 py-1 text-sm"
+          className="min-h-10 max-w-[60%] rounded-lg border border-line bg-surface px-2.5 text-sm text-ink"
           value={storeId ?? ""}
           onChange={(e) => {
             storeIdRef.current = e.target.value;
@@ -311,28 +313,28 @@ export function PairPage() {
 
       <main className="mx-auto max-w-md space-y-4 p-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Pair tags</h1>
-          <button
-            className="text-sm underline"
+          <h1 className="text-2xl font-bold tracking-tight text-ink">Pair tags</h1>
+          <Button
+            variant="quiet"
             onClick={() => {
               setCameraOn((on) => !on);
               setCameraFailed(false); // turning the camera back on retries it
             }}
           >
             {cameraOn ? "Use handheld scanner" : "Use camera"}
-          </button>
+          </Button>
         </div>
 
         {stores.isError && (
-          <p className="rounded bg-red-100 px-3 py-2 text-sm text-red-700">{errorText(stores.error)}</p>
+          <p className="rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">{errorText(stores.error)}</p>
         )}
         {stores.isSuccess && storeList.length === 0 && (
-          <p className="rounded bg-amber-50 p-3 text-sm text-amber-800">You don't have access to any store.</p>
+          <p className="rounded-lg bg-warn-tint p-3 text-sm text-warn">You don't have access to any store.</p>
         )}
 
         {cameraOn && storeId && <CameraScanner onScan={handleScan} onError={() => setCameraFailed(true)} />}
         {!cameraOn && (
-          <p className="rounded bg-gray-50 p-3 text-sm text-gray-600">Ready for the handheld scanner.</p>
+          <p className="rounded-lg bg-surface-2 p-3 text-sm text-muted">Ready for the handheld scanner.</p>
         )}
 
         <form
@@ -343,29 +345,29 @@ export function PairPage() {
             setManual("");
           }}
         >
-          <input
-            className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm"
+          <TextInput
+            className="min-w-0 flex-1"
             placeholder="Or type a code"
             value={manual}
             onChange={(e) => setManual(e.target.value)}
           />
-          <button className="rounded border border-gray-300 px-3 text-sm">Go</button>
+          <Button type="submit">Go</Button>
         </form>
 
-        {notice && <p className={`rounded px-3 py-2 text-sm ${TONES[notice.tone]}`}>{notice.text}</p>}
+        {notice && <p className={`rounded-lg px-3 py-2 text-sm ${TONES[notice.tone]}`}>{notice.text}</p>}
 
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="min-w-0 rounded border border-gray-200 p-3">
-            <h2 className="text-xs font-medium uppercase text-gray-500">Product</h2>
+          <div className="min-w-0 rounded-xl border border-line bg-surface p-4">
+            <h2 className="mb-1.5 text-xs font-bold tracking-wider text-muted uppercase">Product</h2>
             {product ? (
               <>
-                <p className="font-medium">{product.name}</p>
-                {product.variationName !== "Regular" && <p className="text-sm text-gray-600">{product.variationName}</p>}
-                <p className="text-lg font-semibold">{formatPrice(product.price, product.currency)}</p>
+                <p className="font-medium text-ink">{product.name}</p>
+                {product.variationName !== "Regular" && <p className="text-sm text-muted">{product.variationName}</p>}
+                <p className="font-mono text-lg text-ink tabular-nums">{formatPrice(product.price, product.currency)}</p>
                 {product.pricingType === "VARIABLE_PRICING" ? (
-                  <p className="text-sm text-red-600">Variable-price items can't be shown on a label.</p>
+                  <p className="text-sm text-bad">Variable-price items can't be shown on a label.</p>
                 ) : product.price === null && (
-                  <p className="text-sm text-red-600">This item has no price, so it can't be shown on a label.</p>
+                  <p className="text-sm text-bad">This item has no price, so it can't be shown on a label.</p>
                 )}
               </>
             ) : choices.length > 0 ? (
@@ -373,7 +375,7 @@ export function PairPage() {
                 {choices.map((c) => (
                   <li key={c.id}>
                     <button
-                      className="w-full rounded border border-gray-200 px-2 py-1 text-left text-sm hover:bg-gray-50"
+                      className="min-h-10 w-full rounded-lg border border-line-soft bg-surface px-3 py-1.5 text-left text-sm text-ink hover:border-accent-line"
                       onClick={() => dispatch({ type: "product-chosen", product: c })}
                     >
                       {c.name} · {c.variationName} · {formatPrice(c.price, c.currency)}
@@ -382,49 +384,49 @@ export function PairPage() {
                 ))}
               </ul>
             ) : notFound ? (
-              <p className="break-words text-sm text-red-600">
+              <p className="break-words text-sm text-bad">
                 No product with code {notFound} at this store. Search by name below.
               </p>
             ) : (
-              <p className="text-sm text-gray-400">Scan a product barcode</p>
+              <p className="text-sm text-faint">Scan a product barcode</p>
             )}
           </div>
 
-          <div className="min-w-0 rounded border border-gray-200 p-3">
-            <h2 className="text-xs font-medium uppercase text-gray-500">Tag</h2>
+          <div className="min-w-0 rounded-xl border border-line bg-surface p-4">
+            <h2 className="mb-1.5 text-xs font-bold tracking-wider text-muted uppercase">Tag</h2>
             {tag ? (
               <>
-                <p className="font-mono">{tag.tagId}</p>
-                <p className="text-sm text-gray-600">
+                <p className="font-mono text-ink">{tag.tagId}</p>
+                <p className="text-sm text-muted">
                   {tag.status === "new" && "New tag"}
                   {tag.status === "ready" && "Ready"}
                   {tag.status === "assigned" && `Currently showing ${tag.currentName ?? "a product"} — will be replaced`}
                   {tag.status === "other-store" && "This tag can't be used in this store"}
                 </p>
                 {!tag.seenByGateway && (
-                  <p className="text-sm text-amber-700">This store's gateway hasn't seen this tag yet</p>
+                  <p className="text-sm text-warn">This store's gateway hasn't seen this tag yet</p>
                 )}
                 {tag.status !== "new" && tag.status !== "other-store" && (
-                  <button
-                    className="mt-1 text-sm underline"
+                  <Button
+                    className="mt-2"
                     disabled={findLabel.isPending}
                     onClick={() => findLabel.mutate(tag.tagId)}
                   >
+                    <Lightbulb size={15} aria-hidden="true" />
                     Find this label
-                  </button>
+                  </Button>
                 )}
                 {locate && <UpdateStatus key={locate.update_id} initial={locate} />}
               </>
             ) : (
-              <p className="text-sm text-gray-400">Scan a shelf tag</p>
+              <p className="text-sm text-faint">Scan a shelf tag</p>
             )}
           </div>
         </section>
 
         {product === null && choices.length === 0 && (
           <div className="space-y-2">
-            <input
-              className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+            <TextInput
               placeholder="Search products by name"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -432,7 +434,7 @@ export function PairPage() {
             {(results.data ?? []).map((v) => (
               <button
                 key={v.id}
-                className="block w-full rounded border border-gray-200 px-2 py-1 text-left text-sm hover:bg-gray-50"
+                className="block min-h-10 w-full rounded-lg border border-line-soft bg-surface px-3 py-1.5 text-left text-sm text-ink hover:border-accent-line"
                 onClick={() => {
                   dispatch({ type: "product-chosen", product: toChoice(v) });
                   setNotFound(null);
@@ -446,40 +448,41 @@ export function PairPage() {
         )}
 
         {tag && (product || choices.length > 0) && (
-          <div className="space-y-2 rounded border-2 border-blue-600 p-3">
+          <div className="space-y-2.5 rounded-xl border-2 border-accent bg-accent-tint p-4">
             {product && (
-              <p className="text-sm">
+              <p className="text-sm text-accent-ink">
                 <span className="font-mono">{tag.tagId.slice(0, 4)}…</span> → {product.name} ·{" "}
                 {formatPrice(product.price, product.currency)}
               </p>
             )}
             <div className="flex gap-2">
-              <button
-                className="flex-1 rounded bg-blue-600 py-3 text-lg font-semibold text-white disabled:opacity-40"
+              <Button
+                variant="primary"
+                className="min-h-13 flex-1 text-lg"
                 disabled={!readyToPair(state) || !storeId || pair.isPending}
                 onClick={() => {
                   if (tag && product && storeId) pair.mutate({ tag, product, storeId });
                 }}
               >
                 {pair.isPending ? "Pairing…" : "Pair"}
-              </button>
-              <button className="rounded border border-gray-300 px-3 text-sm" onClick={clearSlots}>
+              </Button>
+              <Button className="min-h-13" onClick={clearSlots}>
                 Clear
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {lastPair && (
-          <div className="space-y-2 rounded border border-gray-200 p-3">
-            <p className="break-words text-sm">
+          <div className="space-y-2 rounded-xl border border-line bg-surface p-4">
+            <p className="break-words text-sm text-ink">
               <span className="font-mono">{lastPair.tagId}</span> → {lastPair.productLabel}
             </p>
             <UpdateStatus key={lastPair.update.update_id} initial={lastPair.update} />
             {undoable && (
-              <button className="text-sm underline" disabled={undo.isPending} onClick={() => undo.mutate(lastPair)}>
+              <Button disabled={undo.isPending} onClick={() => undo.mutate(lastPair)}>
                 Undo
-              </button>
+              </Button>
             )}
           </div>
         )}

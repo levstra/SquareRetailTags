@@ -14,9 +14,13 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (auth.error) {
     return (
-      <div className="p-6 text-sm text-red-600">
-        Sign-in failed: {auth.error.message}{" "}
-        <button className="underline" onClick={() => void auth.signinRedirect({ state: { returnTo: window.location.pathname } })}>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-bad">Sign-in failed: {auth.error.message}</p>
+        <button
+          type="button"
+          className="min-h-10 rounded-lg border border-line bg-surface px-3.5 text-sm text-muted hover:text-ink"
+          onClick={() => void auth.signinRedirect({ state: { returnTo: window.location.pathname } })}
+        >
           Try again
         </button>
       </div>
@@ -24,7 +28,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (!auth.isAuthenticated) {
     return (
-      <div className="p-6 text-sm text-gray-500">{isSigningOut() ? "Signing out…" : "Signing in…"}</div>
+      <div className="flex min-h-screen items-center justify-center text-sm text-muted">
+        {isSigningOut() ? "Signing out…" : "Signing in…"}
+      </div>
     );
   }
   return <>{children}</>;

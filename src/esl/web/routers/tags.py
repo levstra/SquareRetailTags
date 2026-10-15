@@ -16,6 +16,7 @@ from esl.scan import normalize_tag_id as scan_normalize_tag_id
 from esl.tags.desired import apply_desired_state, desired_projection, projections_for
 from esl.tags.models import Tag
 from esl.tags.projection import Projection
+from esl.tags.signal import SIGNAL_NEVER_HEARD, battery_volts, classify
 from esl.tags.status import TagExtras, load_tag_extras
 from esl.web.deps import get_business_session, get_current_user, get_request_business_id
 from esl.web.routers.label_updates import LabelUpdateSummary, summarize
@@ -39,6 +40,9 @@ class TagResponse(BaseModel):
     latest_update: LabelUpdateSummary | None = None
     low_battery: bool | None = None
     last_seen_at: datetime | None = None
+    signal: str = SIGNAL_NEVER_HEARD
+    rf_power: int | None = None
+    battery_volts: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -83,10 +87,14 @@ def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
 def _with_extras(response: TagResponse, extras: TagExtras | None) -> TagResponse:
     if extras is None:
         return response
+    telemetry = extras.telemetry
     return response.model_copy(update={
         "latest_update": summarize(extras.latest_update) if extras.latest_update else None,
-        "low_battery": extras.telemetry.low_battery if extras.telemetry else None,
-        "last_seen_at": extras.telemetry.last_seen_at if extras.telemetry else None,
+        "low_battery": telemetry.low_battery if telemetry else None,
+        "last_seen_at": telemetry.last_seen_at if telemetry else None,
+        "signal": classify(telemetry),
+        "rf_power": telemetry.rf_power if telemetry else None,
+        "battery_volts": battery_volts(telemetry.battery) if telemetry else None,
     })
 
 

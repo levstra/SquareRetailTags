@@ -795,6 +795,7 @@ components:
       required:
         - id
         - content_hash
+        - signal
       properties:
         id:
           $ref: "#/components/schemas/TagId"
@@ -846,6 +847,24 @@ components:
         last_seen_at:
           type: [string, "null"]
           format: date-time
+          description: Last time any access point heard this label.
+        signal:
+          type: string
+          enum: [ok, weak, out_of_range, never_heard]
+          description: >
+            Whether the store's access points can currently hear this label,
+            derived from Pi telemetry. `never_heard` means no access point has
+            ever listed it, usually a tag id that matches no real hardware.
+            `out_of_range` means heard once but not within the last hour.
+            `weak` means heard recently at -70 dBm or worse.
+        rf_power:
+          type: [integer, "null"]
+          description: Last reported signal strength in dBm. Null if never heard.
+        battery_volts:
+          type: [number, "null"]
+          description: >
+            Battery reading in volts, from the raw tenths-of-a-volt byte the
+            hardware reports. Not a percentage; no discharge curve is assumed.
 
     LabelUpdateSummary:
       type: object

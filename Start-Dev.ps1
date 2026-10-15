@@ -14,11 +14,15 @@ Stop infrastructure with: docker compose down
 #>
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = $PSScriptRoot,
+    [string]$RepoRoot,
     [switch]$Setup,
     [switch]$NoServers,
     [switch]$NoTunnel
 )
+
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in parameter defaults,
+# so default the repo root here, where it is always set.
+if (!$RepoRoot) { $RepoRoot = $PSScriptRoot }
 
 $ErrorActionPreference = 'Stop'
 

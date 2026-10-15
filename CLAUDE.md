@@ -4,6 +4,8 @@ Syncs pricing from Square (read-only) and publishes desired state for
 electronic shelf labels. A separate Raspberry Pi gateway
 (`../WestgateLabels`), owned by the other developer, long-polls this service
 for label commands and drives the tag hardware.
+The Pi's own store-LAN API (how it pushes to labels) is
+`api/westgate-store-service.yaml`: reference only, not a contract with us.
 
 <!-- Detailed Square SDK and frontend rules are path-scoped in .claude/rules/ -->
 
@@ -12,6 +14,13 @@ for label commands and drives the tag hardware.
 - Square is the source of truth for price. This service is READ-ONLY against
   the catalog. Never write to Square.
 - This service is the source of truth for what each tag displays.
+- The business runs multiple stores. Every tag belongs to exactly one store
+  (`tags.store_id`), and price is resolved per-store: Square's
+  `location_overrides` can override the flat catalog price for a specific
+  location, so the same variation can project to a different price — and a
+  different `content_hash` — in different stores. See
+  `esl.tags.desired.desired_projection` (the override for the tag's store's
+  Square location).
 - The gateway is an effector: it renders and pushes, and reports back what it
   displayed. It never originates price data or computes hashes.
 - The gateway contract is the Pi's:
@@ -53,6 +62,9 @@ for label commands and drives the tag hardware.
 - Diff the projection (name, variation_name, sku, price, pricing_type), not
   the Square `version` field. Square bumps a parent item's version when a
   child variation changes, so version-diffing re-pushes half the fleet.
+  `projection.build_projection` takes an already store-resolved `price` —
+  never read `variation.price` directly when building or rehashing a tag's
+  projection, or you'll skip location overrides.
 - Content hashing must be deterministic across processes and restarts:
   sorted keys, integers for money, explicit null handling. Never use Python's
   builtin `hash()`.

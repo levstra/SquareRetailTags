@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
+import { Button, StatusLabel } from "../ui";
 import { squareConnectionQuery } from "./queries";
 
 const RESULT_MESSAGES: Record<string, { text: string; ok: boolean }> = {
@@ -100,44 +101,57 @@ export function SquareSettings({ result }: { result: string | null }) {
   const locationsError = locations.error ? describeError(locations.error) : "";
 
   return (
-    <section className="max-w-xl space-y-6">
+    <section className="max-w-xl">
+      <h1 className="text-3xl font-bold tracking-tight text-ink">Square</h1>
+      <p className="mt-1.5 mb-7 text-[15px] text-muted">
+        Where prices come from, and which locations have shelf labels.
+      </p>
+
+      <div className="flex flex-col gap-5">
       {banner && (
-        <p className={`rounded px-3 py-2 text-sm ${banner.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>
+        <p className={`rounded-lg px-3 py-2 text-sm ${banner.ok ? "bg-ok-tint text-ok" : "bg-bad-tint text-bad"}`}>
           {banner.text}
         </p>
       )}
 
-      <div className="rounded border border-gray-200 p-4 space-y-2">
-        <h2 className="font-medium">Square account</h2>
-        <p className="text-sm text-gray-600">
-          {connection.isPending
-            ? "Loading…"
-            : status
-              ? STATUS_TEXT[status]
-              : ""}
-          {connection.data?.merchant_id ? ` · ${connection.data.merchant_id}` : ""}
-        </p>
-        {connection.isError && <p className="text-sm text-red-600">{describeError(connection.error)}</p>}
+      <div className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface p-5">
+        <h2 className="text-xs font-bold tracking-wider text-muted uppercase">Square account</h2>
+        {connection.isPending ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : (
+          status && (
+            <StatusLabel tone={active ? "ok" : status === "not_connected" ? "idle" : "bad"}>
+              {STATUS_TEXT[status]}
+              {connection.data?.merchant_id ? (
+                <span className="font-mono text-xs font-normal text-faint">
+                  {connection.data.merchant_id}
+                </span>
+              ) : null}
+            </StatusLabel>
+          )
+        )}
+        {connection.isError && <p className="text-sm text-bad">{describeError(connection.error)}</p>}
         {status != null && !active && (
-          <button
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+          <Button
+            variant="primary"
+            className="self-start"
             disabled={connect.isPending}
             onClick={() => connect.mutate()}
           >
             {status === "not_connected" ? "Connect Square" : "Reconnect Square"}
-          </button>
+          </Button>
         )}
-        <p className="text-xs text-gray-400">Read-only access: catalog items and locations. We never change anything in Square.</p>
+        <p className="text-xs text-faint">Read-only access: catalog items and locations. We never change anything in Square.</p>
       </div>
 
       {active && (
-        <div className="rounded border border-gray-200 p-4 space-y-3">
-          <h2 className="font-medium">Stores</h2>
-          <p className="text-sm text-gray-600">Choose the Square locations that have shelf tags.</p>
-          {locations.isLoading && <p className="text-sm text-gray-400">Loading locations…</p>}
-          {locationsError && <p className="text-sm text-red-600">{locationsError}</p>}
+        <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5">
+          <h2 className="text-xs font-bold tracking-wider text-muted uppercase">Stores</h2>
+          <p className="text-sm text-muted">Choose the Square locations that have shelf labels.</p>
+          {locations.isLoading && <p className="text-sm text-faint">Loading locations…</p>}
+          {locationsError && <p className="text-sm text-bad">{locationsError}</p>}
           {(locations.data ?? []).map((l) => (
-            <label key={l.id} className="flex items-center gap-2 text-sm">
+            <label key={l.id} className="flex min-h-10 items-center gap-2.5 text-sm text-ink">
               <input
                 type="checkbox"
                 checked={chosen.includes(l.id)}
@@ -148,20 +162,22 @@ export function SquareSettings({ result }: { result: string | null }) {
                 }
               />
               {l.name}
-              {l.store_id != null && <span className="text-xs text-gray-400">in use</span>}
+              {l.store_id != null && <span className="text-xs text-faint">in use</span>}
             </label>
           ))}
-          <button
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+          <Button
+            variant="primary"
+            className="self-start"
             disabled={save.isPending || chosen.length === 0 || selected === null}
             onClick={() => save.mutate(chosen)}
           >
             {save.isPending ? "Saving…" : "Save stores"}
-          </button>
+          </Button>
         </div>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">{error}</p>}
+      </div>
     </section>
   );
 }

@@ -1,1 +1,151 @@
 @import "tailwindcss";
+
+/* ── Theme tokens ─────────────────────────────────────────────────────────────
+ *
+ * Components never name a palette color (no `bg-white`, no `text-gray-900`).
+ * They name a ROLE — `bg-surface`, `text-muted`, `text-ok` — and the role's
+ * value is a CSS variable swapped by `data-theme` on <html>.
+ *
+ * `@theme inline` matters here: it makes the generated utility emit
+ * `var(--surface)` rather than copying the value at build time, so flipping
+ * the attribute re-themes the page with no re-render and no duplicated
+ * `dark:` variant on every element.
+ *
+ * `data-theme` is always set explicitly, by the boot script in index.html,
+ * so there is exactly one dark block below instead of one for
+ * `prefers-color-scheme` and a second for the manual override.
+ */
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-line: var(--accent-line);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-ok: var(--ok);
+  --color-ok-tint: var(--ok-tint);
+  --color-warn: var(--warn);
+  --color-warn-dot: var(--warn-dot);
+  --color-warn-tint: var(--warn-tint);
+  --color-bad: var(--bad);
+  --color-bad-tint: var(--bad-tint);
+
+  --color-scrim: var(--scrim);
+
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Light — the default. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --canvas: #faf8fd;
+  --surface: #ffffff;
+  --surface-2: #faf8fd;
+
+  --line: #e7e1f0;
+  --line-soft: #efeaf7;
+
+  --ink: #1c1726;
+  --muted: #574f68;
+  --faint: #6e6680;
+
+  --accent: #6d3fd4;
+  --accent-hover: #5b33b8;
+  --on-accent: #ffffff;
+  --accent-tint: #f3edfe;
+  --accent-line: #dccbfb;
+  --accent-ink: #5b33b8;
+
+  --ok: #0f7a52;
+  --ok-tint: #e3f2ea;
+  --warn: #8a5a06;
+  --warn-dot: #b4780a;
+  --warn-tint: #fbefdc;
+  --bad: #b32d1a;
+  --bad-tint: #fbe9e6;
+
+  --scrim: rgb(28 23 38 / 0.42);
+}
+
+/* Dark. Not an inversion of the above: the accent swaps to the lighter purple
+ * (the deep one reads as 2.8:1 against this ground — invisible as a border),
+ * `--on-accent` flips to near-black because white on #a78bfa is only 2.7:1,
+ * and the status hues trade places with their tints. The scrim is heavier
+ * than light mode's: 42% black over a near-black page separates nothing. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #121018;
+  --surface: #1b1724;
+  --surface-2: #221c2e;
+
+  --line: #2e2740;
+  --line-soft: #221c2c;
+
+  --ink: #edeaf5;
+  --muted: #9a93ad;
+  --faint: #8a829c;
+
+  --accent: #a78bfa;
+  --accent-hover: #b99cff;
+  --on-accent: #19122a;
+  --accent-tint: #2a2140;
+  --accent-line: #3a3150;
+  --accent-ink: #cdb8ff;
+
+  --ok: #4ed6a8;
+  --ok-tint: #1e2a26;
+  --warn: #ffb454;
+  --warn-dot: #ffb454;
+  --warn-tint: #33281a;
+  --bad: #ff8a7a;
+  --bad-tint: #33201d;
+
+  --scrim: rgb(5 3 10 / 0.66);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* One focus ring for the whole app, in the accent of the active mode. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Native controls inherit the app's type instead of the UA's. */
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::selection {
+    background: var(--accent-tint);
+    color: var(--accent-ink);
+  }
+}

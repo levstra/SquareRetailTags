@@ -1,0 +1,414 @@
+# NOTE: pasted from the teammate's spec during the multi-store integration
+# planning session (2026-09-12). The paste was cut off mid-file — everything
+# through the `FailureCode` schema is verbatim; `FailureCode`'s enum values
+# and the `LabelUpdate`, `LabelTelemetry`, `AccessPoint`, `ProvisionResult`,
+# `AccessPointConfigRequest`, `HealthReport`, and `ProblemDetails` schemas
+# are referenced throughout this file but were never received. Ask the
+# teammate for the complete file and replace this one — don't guess at the
+# missing schemas.
+openapi: 3.1.0
+info:
+  title: Westgate Labels store service
+  version: 0.3.0
+  summary: Store-side HTTP API of the Raspberry Pi ESL service.
+  description: |
+    Served by the Pi in each store on port 5000 for the store LAN (no authentication yet; keep it off the
+    internet). It drives SERTAG ESL Gen 3.0 labels through ETAP05 / AP05 access points.
+
+    Two kinds of endpoint:
+    - **Label updates** push a screen or an LED flash to one label through the same pipeline the central system
+      uses. A push is never success by itself: the label confirms later through the access point, so every push
+      returns a `LabelUpdate` record whose `status` reaches `Succeeded`, `Failed` or `Superseded` when it is
+      finished. With `wait=true` (the default) the call blocks for up to one attempt.
+    - **Diagnostics**: what the access points hear (`/api/labels`), the access points themselves, provisioning,
+      and health.
+
+    Tag ids are 12 hexadecimal characters (case-insensitive on input, upper case on output).
+    See `ESL-SERVICE-OVERVIEW.md` for the pipeline and `STORE-DEPLOYMENT.md` for provisioning and placement.
+servers:
+  - url: http://{host}:5000
+    description: The Pi (or a development PC) on the store LAN
+    variables:
+      host:
+        default: localhost
+tags:
+  - name: Label updates
+    description: Push a screen or an LED flash to a label and follow the result.
+  - name: Previews
+    description: Render what a label would show, without hardware.
+  - name: Labels
+    description: The label registry built from access point heartbeats and task results.
+  - name: Access points
+    description: Connected eStation access points and provisioning.
+  - name: Health
+
+paths:
+  /api/labels/{tagId}/test:
+    post:
+      tags: [Label updates]
+      operationId: pushTestText
+      summary: Push plain centred text to a label (test hook)
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+        - name: text
+          in: query
+          schema: { type: string, default: HELLO }
+        - $ref: '#/components/parameters/Wait'
+      responses:
+        '200': { $ref: '#/components/responses/UpdateFinished' }
+        '202': { $ref: '#/components/responses/UpdateAccepted' }
+        '400': { $ref: '#/components/responses/InvalidCommand' }
+
+  /api/labels/{tagId}/product:
+    post:
+      tags: [Label updates]
+      operationId: pushProduct
+      summary: Push the product template to a label
+      description: Same `display` payload the central system sends (contract section 2).
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+        - $ref: '#/components/parameters/Wait'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Display' }
+      responses:
+        '200': { $ref: '#/components/responses/UpdateFinished' }
+        '202': { $ref: '#/components/responses/UpdateAccepted' }
+        '400':
+          description: The display data cannot be rendered (title `InvalidDisplay`) or the tag id is invalid (`InvalidCommand`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  /api/labels/{tagId}/unassign:
+    post:
+      tags: [Label updates]
+      operationId: pushUnassigned
+      summary: Show the UNASSIGNED screen with a Code 128 barcode of the tag id
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+        - $ref: '#/components/parameters/Wait'
+      responses:
+        '200': { $ref: '#/components/responses/UpdateFinished' }
+        '202': { $ref: '#/components/responses/UpdateAccepted' }
+        '400': { $ref: '#/components/responses/InvalidCommand' }
+
+  /api/labels/{tagId}/locate:
+    post:
+      tags: [Label updates]
+      operationId: locateLabel
+      summary: Flash the label's LED so staff can find it
+      description: |
+        Colour comes from the Pi's `Locate:Color` setting (red by default). The flash never changes the screen and
+        never interacts with the label's version ladder. It waits behind an image update already in flight for the
+        same label and replaces a still-queued locate for it. Verified on hardware: `seconds` is the flash duration.
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+        - name: seconds
+          in: query
+          description: Flash duration, 1..65535; omitted means `Locate:DefaultSeconds` (30). Capped at `Locate:MaxSeconds` (300).
+          schema: { type: integer, minimum: 1, maximum: 65535 }
+        - $ref: '#/components/parameters/Wait'
+      responses:
+        '200': { $ref: '#/components/responses/UpdateFinished' }
+        '202': { $ref: '#/components/responses/UpdateAccepted' }
+        '400': { $ref: '#/components/responses/InvalidCommand' }
+
+  /api/labels/{tagId}/unassign/preview:
+    get:
+      tags: [Previews]
+      operationId: previewUnassigned
+      summary: PNG of the UNASSIGNED screen for a tag id
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+      responses:
+        '200': { $ref: '#/components/responses/Png' }
+        '400':
+          description: Not a valid tag id (title `InvalidTagId`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  /api/labels/preview:
+    post:
+      tags: [Previews]
+      operationId: previewProduct
+      summary: PNG of the product template for a display payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Display' }
+      responses:
+        '200': { $ref: '#/components/responses/Png' }
+        '400':
+          description: The display data cannot be rendered (title `InvalidDisplay`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+    get:
+      tags: [Previews]
+      operationId: previewText
+      summary: PNG of centred text
+      parameters:
+        - name: text
+          in: query
+          schema: { type: string, default: HELLO }
+      responses:
+        '200': { $ref: '#/components/responses/Png' }
+
+  /api/labels/updates/{updateId}:
+    get:
+      tags: [Label updates]
+      operationId: getUpdate
+      summary: One label update by id
+      parameters:
+        - name: updateId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The stored record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabelUpdate' }
+        '404':
+          description: Unknown update id.
+
+  /api/labels/updates:
+    get:
+      tags: [Label updates]
+      operationId: listUpdates
+      summary: Recent label updates, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        '200':
+          description: Records ordered by request time, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LabelUpdate' }
+
+  /api/labels:
+    get:
+      tags: [Labels]
+      operationId: listLabels
+      summary: Every label the access points have heard
+      description: |
+        Built from AP heartbeats (every 15 s per AP) and task results. A label is "heard" only when the AP reports a
+        real RF power (not -256). `lowBattery` uses `Label:LowBatteryThreshold` (25 by default; the battery byte is
+        read as tenths of a volt).
+      parameters:
+        - name: lowBattery
+          in: query
+          description: Only labels whose low-battery flag equals this value.
+          schema: { type: boolean }
+        - name: notSeenSince
+          in: query
+          description: Only labels not heard at or after this time (or never heard).
+          schema: { type: string, format: date-time }
+        - name: apId
+          in: query
+          description: Only labels whose most recent sighting came from this access point.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1000 }
+      responses:
+        '200':
+          description: Labels ordered by tag id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LabelTelemetry' }
+
+  /api/labels/{tagId}:
+    get:
+      tags: [Labels]
+      operationId: getLabel
+      summary: One label from the registry
+      parameters:
+        - $ref: '#/components/parameters/TagId'
+      responses:
+        '200':
+          description: The label's telemetry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabelTelemetry' }
+        '404':
+          description: No access point has ever listed this label (or the id is not 12 hex characters).
+
+  /api/access-points:
+    get:
+      tags: [Access points]
+      operationId: listAccessPoints
+      summary: Every access point that has connected to this broker
+      responses:
+        '200':
+          description: Connection state, reported device information, heartbeat and queue counts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AccessPoint' }
+
+  /api/access-points/{apId}/configure:
+    post:
+      tags: [Access points]
+      operationId: configureAccessPoint
+      summary: Publish a configuration to a connected access point
+      description: |
+        Sends an eStationConfig on `/estation/{apId}/configure` (manual 2.6). Fields left out keep the values the AP
+        reported in its `infor`. The AP applies the configuration and reconnects to the server it names, so a wrong
+        `server` strands it until its reset button is long-pressed. The AP must be connected right now; the route
+        takes the 4-character AP id (for example `0CNT`), not a store id.
+      parameters:
+        - name: apId
+          in: path
+          required: true
+          description: The AP's 4-character id (its MQTT client id).
+          schema: { type: string, minLength: 4, maxLength: 4, example: 0CNT }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessPointConfigRequest' }
+            examples:
+              heartbeatOnly:
+                summary: Harmless first test
+                value: { heartbeat: 20 }
+              pointAtStorePi:
+                summary: Move the AP to the store Pi with store credentials
+                value: { server: "192.168.1.50:9081", username: store, password: s3cret, heartbeat: 15 }
+      responses:
+        '202':
+          description: Published. The AP will disconnect and reconnect; watch `GET /api/access-points`.
+          headers:
+            Location:
+              schema: { type: string }
+              description: "`/api/access-points`"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProvisionResult' }
+        '400':
+          description: The resulting configuration is invalid (title `InvalidConfig`), for example heartbeat below 15 or a server that is not host:port.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        '409':
+          description: The AP is not connected (title `ApNotConnected`); it can only be configured through its live MQTT session.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  /api/health:
+    get:
+      tags: [Health]
+      operationId: health
+      summary: Service health for monitoring and installation checks
+      responses:
+        '200':
+          description: "`ok` or `degraded` (see `problems`)."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthReport' }
+        '503':
+          description: "`down`: the MQTT broker is not listening."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthReport' }
+
+components:
+  parameters:
+    TagId:
+      name: tagId
+      in: path
+      required: true
+      description: 12 hexadecimal characters.
+      schema: { type: string, pattern: '^[0-9A-Fa-f]{12}$', example: 840001282A7E }
+    Wait:
+      name: wait
+      in: query
+      description: Block until the label result arrives (up to one attempt plus 30 s). When false, returns 202 at once.
+      schema: { type: boolean, default: true }
+
+  responses:
+    UpdateFinished:
+      description: The update finished within the wait window (`status` is `Succeeded`, `Failed` or `Superseded`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/LabelUpdate' }
+    UpdateAccepted:
+      description: Stored and queued (or still in flight after the wait window). Poll `Location`.
+      headers:
+        Location:
+          schema: { type: string }
+          description: "`/api/labels/updates/{updateId}`"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/LabelUpdate' }
+    InvalidCommand:
+      description: The tag id or content is invalid (title `InvalidCommand`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    Png:
+      description: 296x128 black-and-white PNG, exactly what the label would show.
+      content:
+        image/png:
+          schema: { type: string, format: binary }
+
+  schemas:
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: string
+          description: Decimal string, no floats.
+          example: "219.99"
+        currency:
+          type: string
+          description: ISO 4217.
+          example: USD
+
+    Display:
+      type: object
+      description: Product data aligned with the Square catalog model (item name, variation, price, SKU).
+      required: [itemName, price]
+      properties:
+        itemName: { type: string, example: 2024 Topps Chrome Baseball }
+        variationName:
+          type: [string, 'null']
+          description: Sent as Square has it; `Regular` and a name equal to the item name are hidden.
+          example: Hobby Box
+        price: { $ref: '#/components/schemas/Money' }
+        sku: { type: [string, 'null'], example: TC24-HBY }
+        category: { type: [string, 'null'], description: Stored, not rendered. }
+        description: { type: [string, 'null'], description: Stored, not rendered. }
+
+    LabelUpdateStatus:
+      type: string
+      description: |
+        `Accepted` stored; `Queued` waiting; `SentToAp` handed to an access point (not success); `Succeeded` the
+        label confirmed; `Failed` see `failureCode`; `Superseded` a newer version or locate overtook it.
+      enum: [Accepted, Queued, SentToAp, Succeeded, Failed, Superseded]
+
+    # --- Paste ended here. Missing from this file (do not fabricate — get
+    # the real definitions from the teammate before relying on them):
+    #   FailureCode (enum, referenced by LabelUpdate.failureCode)
+    #   LabelUpdate
+    #   LabelTelemetry
+    #   AccessPoint
+    #   ProvisionResult
+    #   AccessPointConfigRequest
+    #   HealthReport
+    #   ProblemDetails
