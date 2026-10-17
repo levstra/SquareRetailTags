@@ -6,6 +6,7 @@ from esl.gateway.auth import GatewayContext
 from esl.gateway.commands import enqueue_retry
 from esl.gateway.models import DISPLAY_ACTIONS, FINAL_STATUSES, LabelUpdate
 from esl.gateway.wire import StatusReportIn
+from esl.tags.desired import apply_desired_state
 from esl.tags.models import Tag
 
 
@@ -64,6 +65,22 @@ async def _apply(session: AsyncSession, command: LabelUpdate, report: StatusRepo
         tag = await session.get(Tag, command.tag_id)
         if tag is not None:
             await enqueue_retry(session, tag, command)
+    elif report.status == "Superseded" and report.known_version is not None:
+        await _reissue_above_gateway_version(session, command, report.known_version)
+
+
+async def _reissue_above_gateway_version(session: AsyncSession, command: LabelUpdate, known_version: int) -> None:
+    """The Pi rejected central's latest version as not newer than one it already holds
+    (contract section 5): central's ladder is behind the Pi's, e.g. after the central
+    database restarted versions at 0. Send the current desired state once, above it.
+
+    A rejection of an older version means central has already moved on, and the stored
+    report short-circuits duplicates before we get here, so this sends at most once.
+    """
+    tag = await session.get(Tag, command.tag_id)
+    if tag is None or tag.version != command.version or known_version < command.version:
+        return
+    await apply_desired_state(session, tag, resend_unconfirmed=True, above_version=known_version)
 
 
 async def _supersede_lower_versions(session: AsyncSession, command: LabelUpdate, report: StatusReportIn) -> None:

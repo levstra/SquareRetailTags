@@ -58,6 +58,8 @@ class StatusReportIn(_Camel):
     failure_code: str | None = None
     failure_message: str | None = None
     retryable: bool | None = None
+    # Superseded at intake only: the highest version the Pi already applied or holds for this label.
+    known_version: int | None = None
     diagnostics: DiagnosticsIn | None = None
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from esl.businesses.models import Store
 from esl.catalog.models import CatalogVariation, VariationLocationPrice
-from esl.gateway.commands import enqueue_for_tag, variation_currency
+from esl.gateway.commands import display_unconfirmed, enqueue_for_tag, variation_currency
 from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import UNASSIGNED, Projection, build_projection
@@ -66,7 +66,10 @@ async def desired_projection(session: AsyncSession, tag: Tag) -> Projection:
     return (await projections_for(session, [tag]))[tag.id]
 
 
-async def apply_desired_state(session: AsyncSession, tag: Tag, *, force: bool = False) -> bool:
+async def apply_desired_state(
+    session: AsyncSession, tag: Tag, *, force: bool = False, resend_unconfirmed: bool = False,
+    above_version: int = 0,
+) -> bool:
     """Recompute tag.content_hash; when it changes, issue exactly one command. Does not commit.
 
     Same weight as projection.py/hashing.py: this decides whether a tag is rewritten.
@@ -74,11 +77,19 @@ async def apply_desired_state(session: AsyncSession, tag: Tag, *, force: bool = 
     Pi replacement), which enqueues the current state anyway and still sets the hash.
     A changed hash on a tag that stays unassigned sets the hash but sends nothing
     (see enqueue_for_tag); `force` sends regardless.
+
+    `resend_unconfirmed` (a store move, a Pi rejecting the latest version, `esl admin
+    resend-tag`) also sends an unchanged state, but only when its latest display version
+    ended without reaching the label (display_unconfirmed): confirmed or in-flight
+    content is never sent again. `above_version`: see enqueue_for_tag.
     """
     projection = await desired_projection(session, tag)
     new_hash = hash_projection(projection)
     if new_hash == tag.content_hash and not force:
-        return False
+        if not (resend_unconfirmed and await display_unconfirmed(session, tag)):
+            return False
+        force = True  # a stranded Unassign must not suppress its own resend
     tag.content_hash = new_hash
-    await enqueue_for_tag(session, tag, projection, await variation_currency(session, tag), force=force)
+    await enqueue_for_tag(session, tag, projection, await variation_currency(session, tag), force=force,
+                          above_version=above_version)
     return True

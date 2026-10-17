@@ -12,7 +12,7 @@ from esl.accounts.identity import make_identity_provider
 from esl.accounts.service import create_business, invite_user
 from esl.admin_db import REQUIRED_ENV, bootstrap_db, master_url_from_env
 from esl.config import settings
-from esl.gateway.admin import create_gateway, push_all, revoke_gateway, set_store_code
+from esl.gateway.admin import create_gateway, push_all, resend_tag, revoke_gateway, set_store_code
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -52,6 +52,14 @@ def _parser() -> argparse.ArgumentParser:
     push = admin.add_parser("push-all", help="send every tag its current desired state")
     push.add_argument("--business", required=True, type=uuid.UUID)
     push.add_argument("--store", type=uuid.UUID)
+
+    resend = admin.add_parser(
+        "resend-tag", help="resend one tag's desired state if its label never confirmed it"
+    )
+    resend.add_argument("--business", required=True, type=uuid.UUID)
+    resend.add_argument("--tag", required=True)
+    resend.add_argument("--above-version", type=int, default=0,
+                        help="highest version the tag's current Pi already holds for it")
     return parser
 
 
@@ -111,6 +119,18 @@ async def _run(args: argparse.Namespace) -> int:
             elif args.command == "push-all":
                 count = await push_all(session, business_id=args.business, store_id=args.store)
                 print(f"Queued the current state for {count} tag(s).")
+            elif args.command == "resend-tag":
+                try:
+                    command = await resend_tag(session, business_id=args.business, tag_id=args.tag,
+                                               above_version=args.above_version)
+                except LookupError as error:
+                    print(str(error), file=sys.stderr)
+                    return 1
+                if command is None:
+                    print(f"Tag {args.tag.upper()}: latest display is confirmed or still in flight; nothing sent.")
+                else:
+                    print(f"Queued {command.action} {command.update_id} at version {command.version} "
+                          f"for tag {command.tag_id} (store {command.store_id}).")
     finally:
         await engine.dispose()
     return 0

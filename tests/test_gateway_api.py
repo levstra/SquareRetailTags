@@ -13,7 +13,7 @@ from tests.contract_examples import (
     LOCATE_COMMAND, SUCCEEDED_REPORT, TELEMETRY, UNASSIGN_COMMAND, UPDATE_COMMAND,
 )
 from tests.gateway_helpers import command_row, insert_command, key
-from tests.seed import BUSINESS_A, BUSINESS_B, GATEWAY_A_KEY, GATEWAY_B_KEY, STORE_A2, STORE_B, TAG_A
+from tests.seed import BUSINESS_A, BUSINESS_B, GATEWAY_A_KEY, GATEWAY_B_KEY, STORE_A, STORE_A2, STORE_B, TAG_A
 
 pytestmark = pytest.mark.usefixtures("two_businesses")
 
@@ -349,3 +349,88 @@ async def test_repeated_telemetry_is_fine(anon_client, admin_session):
     count = (await admin_session.execute(text(
         "select count(*) from label_telemetry where tag_id = '840001282A7E'"))).scalar_one()
     assert count == 1
+
+
+# ---- Pi version ladder ahead of central (contract section 5, knownVersion) ----------------------
+
+async def _only_pending_v1_for_tag_a(admin_session) -> uuid.UUID:
+    """TAG_A at version 1 with one queued v1, as when central's ladder restarted below the Pi's."""
+    v1 = uuid.uuid4()
+    await admin_session.execute(text("delete from label_updates where tag_id = :t"), {"t": TAG_A})
+    await admin_session.execute(text("update tags set version = 1 where id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+    await insert_command(update_id=v1, tag_id=TAG_A, version=1, display=UPDATE_COMMAND["display"],
+                         product_id="VAR_A")
+    return v1
+
+
+def _rejected(update_id: uuid.UUID, version: int, known_version: int | None) -> dict:
+    report = {**SUCCEEDED_REPORT, "updateId": str(update_id), "tagId": TAG_A, "version": version,
+              "status": "Superseded", "attempt": 0, "apId": None, "diagnostics": None,
+              "failureMessage": f"Version {version} is not newer than version {known_version} "
+                                "already applied or pending for this label"}
+    if known_version is not None:
+        report["knownVersion"] = known_version
+    return report
+
+
+async def _tag_a_commands(admin_session):
+    return (await admin_session.execute(text(
+        "select update_id, store_id, version, status, display from label_updates "
+        "where tag_id = :t order by version"), {"t": TAG_A})).all()
+
+
+async def test_pi_rejecting_central_latest_version_reissues_above_the_pi_ladder(anon_client, admin_session):
+    v1 = await _only_pending_v1_for_tag_a(admin_session)
+
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=3)])
+
+    [first, reissued] = await _tag_a_commands(admin_session)
+    assert (first.update_id, first.status) == (v1, "Superseded")
+    assert (reissued.store_id, reissued.version, reissued.status) == (STORE_A, 4, "Pending")
+    assert reissued.display["itemName"] == "Item A"
+    tag_version = (await admin_session.execute(text("select version from tags where id = :t"), {"t": TAG_A})).scalar_one()
+    assert tag_version == 4
+
+
+async def test_succeeded_reissue_confirms_the_tag(anon_client, admin_session):
+    v1 = await _only_pending_v1_for_tag_a(admin_session)
+    await admin_session.execute(text("update tags set last_confirmed_at = null where id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=3)])
+    [_, reissued] = await _tag_a_commands(admin_session)
+
+    succeeded = {**SUCCEEDED_REPORT, "updateId": str(reissued.update_id), "tagId": TAG_A, "version": 4}
+    await _post_status(anon_client, [succeeded])
+
+    assert (await command_row(reissued.update_id)).status == "Succeeded"
+    confirmed = (await admin_session.execute(text("select last_confirmed_at from tags where id = :t"), {"t": TAG_A})).scalar_one()
+    assert confirmed == _ts(SUCCEEDED_REPORT["statusAt"])
+
+
+async def test_pi_rejecting_an_older_version_sends_nothing(anon_client, admin_session):
+    # Central already sent v2 after v1; the Pi superseding v1 by v2 is the normal ladder.
+    v1 = await _only_pending_v1_for_tag_a(admin_session)
+    await insert_command(update_id=uuid.uuid4(), tag_id=TAG_A, version=2, display=UPDATE_COMMAND["display"])
+    await admin_session.execute(text("update tags set version = 2 where id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=2)])
+
+    assert [(c.version, c.status) for c in await _tag_a_commands(admin_session)] == [(1, "Superseded"), (2, "Pending")]
+
+
+async def test_rejection_without_known_version_sends_nothing(anon_client, admin_session):
+    # An older Pi build: no ladder to jump past, so no automatic reissue (esl admin resend-tag recovers).
+    v1 = await _only_pending_v1_for_tag_a(admin_session)
+
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=None)])
+
+    assert [(c.version, c.status) for c in await _tag_a_commands(admin_session)] == [(1, "Superseded")]
+
+
+async def test_replayed_rejection_reissues_only_once(anon_client, admin_session):
+    v1 = await _only_pending_v1_for_tag_a(admin_session)
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=3)])
+    await _post_status(anon_client, [_rejected(v1, 1, known_version=3)])
+    assert [(c.version, c.status) for c in await _tag_a_commands(admin_session)] == [(1, "Superseded"), (4, "Pending")]

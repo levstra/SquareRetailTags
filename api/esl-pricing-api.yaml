@@ -1392,6 +1392,14 @@ components:
             false for LabelRejectedKey, LabelHardwareError, RenderError, InvalidCommand and InternalError.
             Central owns business retries: issue a new updateId and, for display actions, a newer version.
             Re-pending the same terminal ID only retrieves its stored outcome.
+        knownVersion:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Superseded at intake only: the highest version this Pi had already applied or was holding for
+            the label when it rejected this one as not newer. Null otherwise. When it is not lower than
+            central's latest version, central's ladder is behind the Pi's; central resends the current
+            state once, above knownVersion. Additive; older Pis omit it.
         diagnostics:
           oneOf:
             - $ref: '#/components/schemas/Diagnostics'

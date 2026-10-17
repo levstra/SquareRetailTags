@@ -135,6 +135,41 @@ async def test_move_leaves_dispatched_command_with_the_old_store(client, admin_s
     assert await _commands(admin_session, NEW_TAG) == [(update_id, STORE_A, "Dispatched", version)]
 
 
+@pytest.mark.parametrize("final_status", ["Superseded", "Failed"])
+async def test_unchanged_move_resends_a_display_the_old_store_never_confirmed(client, admin_session, final_status):
+    # e.g. the old store's Pi rejected the version as not newer than its own ladder.
+    await _drop_a2_override(admin_session)
+    await client.put(f"/v1/tags/{NEW_TAG}", json={"variation_id": "VAR_A", "store_id": str(STORE_A)})
+    await admin_session.execute(text(
+        "update label_updates set status = :s, final_at = now() where tag_id = :t"
+    ), {"s": final_status, "t": NEW_TAG})
+    await admin_session.commit()
+    [(update_id, _store, _status, version)] = await _commands(admin_session, NEW_TAG)
+
+    await client.put(f"/v1/tags/{NEW_TAG}", json={"variation_id": "VAR_A", "store_id": str(STORE_A2)})
+
+    [old, new] = await _commands(admin_session, NEW_TAG)
+    assert old == (update_id, STORE_A, final_status, version)
+    assert (new.store_id, new.status, new.version) == (STORE_A2, "Pending", version + 1)
+    # Scanning it again in the same store does not send it again.
+    await client.put(f"/v1/tags/{NEW_TAG}", json={"variation_id": "VAR_A", "store_id": str(STORE_A2)})
+    assert len(await _commands(admin_session, NEW_TAG)) == 2
+
+
+async def test_unchanged_move_of_a_confirmed_tag_sends_nothing(client, admin_session):
+    await _drop_a2_override(admin_session)
+    await client.put(f"/v1/tags/{NEW_TAG}", json={"variation_id": "VAR_A", "store_id": str(STORE_A)})
+    await admin_session.execute(text(
+        "update label_updates set status = 'Succeeded', final_at = now() where tag_id = :t"
+    ), {"t": NEW_TAG})
+    await admin_session.commit()
+    [(update_id, _store, _status, version)] = await _commands(admin_session, NEW_TAG)
+
+    await client.put(f"/v1/tags/{NEW_TAG}", json={"variation_id": "VAR_A", "store_id": str(STORE_A2)})
+
+    assert await _commands(admin_session, NEW_TAG) == [(update_id, STORE_A, "Succeeded", version)]
+
+
 async def test_move_needs_access_to_the_tags_current_store(client, admin_session):
     # Staff A may use STORE_A2 but not STORE_A, where TAG_A lives.
     response = await client.put(

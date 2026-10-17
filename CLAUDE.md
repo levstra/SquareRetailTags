@@ -35,6 +35,11 @@ The Pi's own store-LAN API (how it pushes to labels) is
   (`Update`, `Unassign`, `Locate`) in `label_updates`. Display commands are
   created only by `esl.tags.desired.apply_desired_state` when the hash
   changes, by retries of retryable failures, and by `esl admin push-all`.
+  `apply_desired_state(resend_unconfirmed=True)` also resends an unchanged
+  state whose latest display version ended Superseded/Failed (never a
+  confirmed or in-flight one): on a store move, when the Pi rejects
+  central's latest version with `knownVersion` (central's ladder is behind
+  the Pi's; the resend goes above it), and via `esl admin resend-tag`.
 
 ## Layout
 

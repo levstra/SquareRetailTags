@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.businesses.models import Store
 from esl.gateway.keys import generate_key
-from esl.gateway.models import Gateway
+from esl.gateway.models import Gateway, LabelUpdate
+from esl.scan import normalize_tag_id
 from esl.tags.desired import apply_desired_state
 from esl.tags.models import Tag
 
@@ -57,3 +58,28 @@ async def push_all(session: AsyncSession, *, business_id: uuid.UUID, store_id: u
         await apply_desired_state(session, tag, force=True)
     await session.commit()
     return len(tags)
+
+
+async def resend_tag(
+    session: AsyncSession, *, business_id: uuid.UUID, tag_id: str, above_version: int = 0
+) -> LabelUpdate | None:
+    """Recover one tag whose desired state never reached its label. Returns the new command, or None.
+
+    Sends only when the content changed or the latest display version ended unconfirmed
+    (Superseded/Failed), so a confirmed label is never rewritten. `above_version` is the
+    highest version the tag's current Pi already holds for it (label_versions plus queued
+    work there); the new command goes above it so that Pi cannot supersede it unseen.
+    """
+    normalized = normalize_tag_id(tag_id)
+    tag = await session.get(Tag, normalized) if normalized else None
+    if tag is None or tag.business_id != business_id:
+        raise LookupError(f"tag {tag_id} not found in business {business_id}")
+    sent = await apply_desired_state(session, tag, resend_unconfirmed=True, above_version=above_version)
+    command = None
+    if sent:
+        command = (await session.execute(
+            select(LabelUpdate).where(LabelUpdate.business_id == business_id, LabelUpdate.tag_id == tag.id,
+                                      LabelUpdate.version == tag.version)
+        )).scalar_one_or_none()
+    await session.commit()
+    return command

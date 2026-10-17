@@ -205,7 +205,9 @@ async def assign_tag(
         if store_moved:
             # Unchanged content enqueues nothing below, so a queued command must follow the tag.
             await rehome_pending(session, tag)
-        await apply_desired_state(session, tag)
+        # A moved tag whose last display never reached it (e.g. the old store's Pi rejected
+        # it) gets that state again at the new store; confirmed content is not resent.
+        await apply_desired_state(session, tag, resend_unconfirmed=store_moved)
         await session.commit()
     except IntegrityError:
         # RLS hid an existing tag with this ID in another business. Don't say so.

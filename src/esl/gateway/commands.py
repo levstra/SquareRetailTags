@@ -73,22 +73,40 @@ async def _latest_display_command(session: AsyncSession, tag: Tag) -> LabelUpdat
     )).scalar_one_or_none()
 
 
+async def display_unconfirmed(session: AsyncSession, tag: Tag) -> bool:
+    """True when the tag's latest display version ended without reaching the label.
+
+    Pending/Dispatched are still on their way and Succeeded is on the shelf; only a
+    terminal Superseded or Failed latest version leaves the desired state stranded. A
+    Superseded latest version was rejected by the Pi itself: central supersedes only
+    in favour of a higher version, so its own never end up latest. No command at all
+    (a tag from before 0006) counts as unconfirmed too.
+    """
+    latest = await _latest_display_command(session, tag)
+    return latest is None or latest.status in ("Superseded", "Failed")
+
+
 async def enqueue_for_tag(
-    session: AsyncSession, tag: Tag, projection: Projection, currency: str | None, *, force: bool = False
+    session: AsyncSession, tag: Tag, projection: Projection, currency: str | None, *,
+    force: bool = False, above_version: int = 0,
 ) -> LabelUpdate | None:
     """Issue the next display version for `tag`. Does not commit.
 
     Returns None without enqueueing when the tag would be sent Unassign but its latest
     display command already is an Unassign that hasn't Failed: an Unassign carries no
     content, so a second one (e.g. a variable-priced item renamed) is a wasted radio
-    write. `force` (operator push-all) always sends.
+    write. `force` (operator push-all, resending an unconfirmed state) always sends.
+
+    `above_version` is a floor: the new version is above both it and tag.version. It is
+    the version the gateway already holds for this label when that is ahead of central
+    (contract section 5: anything not newer is Superseded unseen).
     """
     displayable = can_display(projection, currency)
     if not displayable and not force:
         latest = await _latest_display_command(session, tag)
         if latest is not None and latest.action == "Unassign" and latest.status != "Failed":
             return None
-    tag.version += 1
+    tag.version = max(tag.version, above_version) + 1
     await _supersede_pending(session, tag, DISPLAY_ACTIONS, f"Superseded centrally by version {tag.version}")
     if displayable:
         command = _new(tag, action="Update", version=tag.version, product_id=tag.variation_id,

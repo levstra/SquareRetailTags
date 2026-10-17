@@ -62,3 +62,34 @@ def test_push_all_ignores_a_colliding_variation_id_in_another_business(seeded):
     [(display,)] = _sql("select display from label_updates where tag_id = :t and version = 2", {"t": TAG_A})
     assert display["itemName"] == "Item A"
     assert display["price"]["amount"] == "10.00"
+
+
+def _align_tag_a_hash():
+    # The seeded 'hash-a' is a placeholder; with the real hash the desired content is unchanged.
+    from tests.seed import GOLDEN_HASH_VAR_A
+    _sql("update tags set content_hash = :h where id = :t", {"h": GOLDEN_HASH_VAR_A, "t": TAG_A})
+
+
+def test_resend_tag_reissues_an_unconfirmed_display_above_the_pis_version(seeded, capsys):
+    _align_tag_a_hash()
+    _sql("update label_updates set status = 'Superseded' where tag_id = :t", {"t": TAG_A})
+    assert cli.main(["admin", "resend-tag", "--business", str(BUSINESS_A), "--tag", TAG_A.lower(),
+                     "--above-version", "3"]) == 0
+    rows = _sql("select version, status from label_updates where tag_id = :t order by version", {"t": TAG_A})
+    assert rows == [(1, "Superseded"), (4, "Pending")]
+    assert _sql("select version from tags where id = :t", {"t": TAG_A}) == [(4,)]
+    assert "version 4" in capsys.readouterr().out
+
+
+def test_resend_tag_leaves_a_confirmed_display_alone(seeded, capsys):
+    _align_tag_a_hash()   # seeded v1 is Succeeded
+    assert cli.main(["admin", "resend-tag", "--business", str(BUSINESS_A), "--tag", TAG_A,
+                     "--above-version", "3"]) == 0
+    assert _sql("select count(*) from label_updates where tag_id = :t", {"t": TAG_A}) == [(1,)]
+    assert _sql("select version from tags where id = :t", {"t": TAG_A}) == [(1,)]
+    assert "nothing sent" in capsys.readouterr().out
+
+
+def test_resend_tag_in_another_business_is_not_found(seeded, capsys):
+    assert cli.main(["admin", "resend-tag", "--business", str(BUSINESS_A), "--tag", TAG_B]) == 1
+    assert _sql("select count(*) from label_updates where tag_id = :t", {"t": TAG_B}) == [(1,)]

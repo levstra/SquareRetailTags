@@ -820,6 +820,14 @@ export interface components {
              *     Re-pending the same terminal ID only retrieves its stored outcome.
              */
             retryable?: boolean | null;
+            /**
+             * Format: int64
+             * @description Superseded at intake only: the highest version this Pi had already applied or was holding for
+             *     the label when it rejected this one as not newer. Null otherwise. When it is not lower than
+             *     central's latest version, central's ladder is behind the Pi's; central resends the current
+             *     state once, above knownVersion. Additive; older Pis omit it.
+             */
+            knownVersion?: number | null;
             diagnostics?: components["schemas"]["Diagnostics"] | null;
         };
         LabelTelemetry: {
