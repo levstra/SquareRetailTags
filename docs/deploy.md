@@ -295,8 +295,12 @@ changes), and once after migrating an existing database to `0006`.
   before re-running.
 - Losing `infra/bootstrap`'s local state file is recoverable: `terraform import`
   the four bucket resources (the bucket has `prevent_destroy`).
-- The GitHub OIDC trust is case-sensitive on the repository name
-  (`levstra/SquareRetailTags`).
+- The GitHub OIDC trust matches the repo's `sub` claim exactly. This repo
+  uses GitHub's immutable subjects (`repo:levstra@339920851/SquareRetailTags@1336255242:…`),
+  set in `github_oidc_subject_prefix`. If `deploy` fails with "Not authorized
+  to perform sts:AssumeRoleWithWebIdentity", compare that variable with
+  `sub_claim_prefix` from
+  `gh api repos/levstra/SquareRetailTags/actions/oidc/customization/sub`.
 
 ## Costs (~$40/mo)
 

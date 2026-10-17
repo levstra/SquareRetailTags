@@ -32,9 +32,14 @@ variable "alarm_email" {
   description = "Receives CloudWatch alarm emails (confirm the SNS subscription email)."
 }
 
-variable "github_repository" {
-  type    = string
-  default = "levstra/SquareRetailTags"
+variable "github_oidc_subject_prefix" {
+  type        = string
+  default     = "repo:levstra@339920851/SquareRetailTags@1336255242"
+  description = <<-EOT
+    The repo's OIDC `sub` prefix, exactly as GitHub issues it. The repo uses immutable subjects
+    (owner and repo IDs), so renames and transfers don't break the trust. Check it with:
+    gh api repos/levstra/SquareRetailTags/actions/oidc/customization/sub (sub_claim_prefix).
+  EOT
 }
 
 variable "create_github_oidc_provider" {
