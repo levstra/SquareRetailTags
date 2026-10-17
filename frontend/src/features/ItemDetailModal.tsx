@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import clsx from "clsx";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { formatPrice, tagStatus, variationLabel } from "../lib/format";
 import {
   TAG_ID_RE,
+  errorMessage,
+  useStoreNames,
   useStores,
   useTags,
   type Tag,
@@ -93,8 +95,10 @@ export function ItemDetailModal({
   const [newStoreId, setNewStoreId] = useState("");
   const [error, setError] = useState("");
 
+  const storeName = useStoreNames();
   const tags = (tagData ?? []).filter((t) => t.variation_id === variation.id);
   const stores = storeData ?? [];
+  const storeChoice = newStoreId || (stores.length === 1 ? stores[0].id : "");
 
   const invalidateTags = () =>
     queryClient.invalidateQueries({ queryKey: ["tags"] });
@@ -105,14 +109,14 @@ export function ItemDetailModal({
       if (!TAG_ID_RE.test(id)) {
         throw new Error("Tag ID must be exactly 12 uppercase hex characters");
       }
-      if (!newStoreId) {
+      if (!storeChoice) {
         throw new Error("Store is required");
       }
-      const { error } = await api.PUT("/tags/{tag_id}", {
+      const { error, response } = await api.PUT("/tags/{tag_id}", {
         params: { path: { tag_id: id } },
-        body: { store_id: newStoreId, variation_id: variation.id },
+        body: { store_id: storeChoice, variation_id: variation.id },
       });
-      if (error) throw error;
+      if (!response.ok) throw new ApiError(response, error);
     },
     onSuccess: () => {
       invalidateTags();
@@ -120,18 +124,19 @@ export function ItemDetailModal({
       setNewStoreId("");
       setError("");
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e) => setError(errorMessage(e)),
   });
 
   const unassignMutation = useMutation({
     mutationFn: async (tag: Tag) => {
-      const { error } = await api.PUT("/tags/{tag_id}", {
+      const { error, response } = await api.PUT("/tags/{tag_id}", {
         params: { path: { tag_id: tag.id } },
-        body: { store_id: tag.store_id, variation_id: null },
+        body: { store_id: tag.store_id ?? null, variation_id: null },
       });
-      if (error) throw error;
+      if (!response.ok) throw new ApiError(response, error);
     },
     onSuccess: invalidateTags,
+    onError: (e) => setError(errorMessage(e)),
   });
 
   const variationName = variationLabel(variation);
@@ -180,7 +185,7 @@ export function ItemDetailModal({
             >
               <div className="min-w-0">
                 <p className="font-mono text-xs text-ink">{tag.id}</p>
-                <p className="mt-0.5 text-xs text-faint">{tag.store_id}</p>
+                <p className="mt-0.5 text-xs text-faint">{storeName(tag.store_id)}</p>
               </div>
               <StatusLabel tone={status.tone}>{status.label}</StatusLabel>
               <Button
@@ -211,7 +216,7 @@ export function ItemDetailModal({
         <Select
           aria-label="Store"
           className="w-auto basis-36"
-          value={newStoreId}
+          value={storeChoice}
           onChange={(e) => setNewStoreId(e.target.value)}
         >
           <option value="">— Store —</option>

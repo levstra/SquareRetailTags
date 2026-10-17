@@ -2,26 +2,31 @@ openapi: "3.1.0"
 
 info:
   title: ESL Pricing API
-  version: "0.2.0"
+  version: "0.1.0"
   description: >
-    Contract between the ESL Pricing Service and each store's gateway. The
-    gateway (one per store, owned by the store team) polls /tags for its own
-    store's desired state and reports back confirmations. It identifies its
-    store with the X-Store-Key header issued when the store was created via
-    POST /stores.
-
-    This is the central-service side only. What the gateway does with a
-    changed tag — how it drives the physical label hardware on its store's
-    LAN — is a separate, store-local contract. See README.md.
+    Dashboard API of the ESL Pricing Service. Every operation requires a
+    Cognito access token (`Authorization: Bearer`) unless it declares
+    `security: []`. The three operations tagged `gateway` are called only by
+    the store Pi, live under `/api` (not `/v1`) and use the per-store
+    `X-Api-Key` instead; they are copied from the Pi's contract
+    (WestgateLabels/docs/central-api.openapi.yaml).
 
 servers:
   - url: /v1
+
+security:
+  - cognitoBearer: []
+
+tags:
+  - name: gateway
+    description: Called only by the store Pi. Copied unchanged from WestgateLabels/docs/central-api.openapi.yaml; change both repos together.
 
 paths:
   /health:
     get:
       operationId: getHealth
       summary: Health check
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -34,9 +39,28 @@ paths:
     get:
       operationId: listVariations
       summary: List all catalog variations for tag assignment
-      security:
-        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive search on item name, variation name or SKU (max 50 results).
+          schema: { type: string }
+        - name: store_id
+          in: query
+          required: false
+          description: Only variations available at this store, priced for it.
+          schema: { type: string, format: uuid }
       responses:
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: All known variations with parent item name
           content:
@@ -44,98 +68,78 @@ paths:
               schema:
                 $ref: "#/components/schemas/VariationList"
 
-  /stores:
+  /scan/classify:
     get:
-      operationId: listStores
-      summary: List all stores
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Stores (api_key omitted — only returned once, on creation)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Store"
-    post:
-      operationId: createStore
-      summary: Register a new store
-      description: >
-        Returns the generated api_key exactly once. Hand it to that store's
-        gateway operator to configure as the X-Store-Key header — it cannot
-        be retrieved again afterward.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/StoreCreateBody"
-      responses:
-        "200":
-          description: Store created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/StoreWithKey"
-        "400":
-          description: id or square_location_id already in use
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /admin/tags:
-    get:
-      operationId: listTagsAdmin
-      summary: List tags across all stores, for the admin dashboard
-      description: >
-        Gated by Auth0 login, not X-Store-Key — the dashboard isn't a
-        gateway and has no per-store key; it authenticates the human
-        instead. Optionally narrow to one store.
-      security:
-        - bearerAuth: []
+      operationId: classifyScan
+      summary: Decide whether a scanned code is a shelf tag or a product
       parameters:
-        - name: store_id
-          in: query
-          schema:
-            type: string
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: store_id, in: query, required: true, schema: { type: string, format: uuid } }
       responses:
         "200":
-          description: List of tags, optionally filtered by store
+          description: Classification
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/TagList"
+              schema: { $ref: "#/components/schemas/ClassifyResult" }
+        "400":
+          description: Empty scan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /catalog/lookup:
+    get:
+      operationId: lookupProduct
+      summary: Find variations by scanned GTIN, then SKU, available at a store
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: store_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Zero or more matches, priced for the store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupResult" }
+        "400":
+          description: Empty code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Store not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /tags:
     get:
       operationId: listTags
-      summary: List all tags for the requesting store
+      summary: List all tags with their desired display state
       description: >
-        The gateway polls this endpoint to discover which of its own store's
-        tags need updating. X-Store-Key identifies the store; only that
-        store's tags are returned. The gateway compares content_hash against
-        what it last rendered; if different, it fetches and pushes the new
-        content.
-      security:
-        - storeKey: []
+        Tags in the stores the signed-in user may use (every store for owners
+        and all-stores staff). A staff member with no store access gets an
+        empty list. This is the dashboard's view; the Pi gateway does not use it
+        (see the Pi contract).
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
-          description: List of tags belonging to the authenticated store
+          description: List of tags
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TagList"
-        "401":
-          description: Missing or invalid X-Store-Key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
   /tags/{tag_id}:
     parameters:
@@ -147,46 +151,40 @@ paths:
     get:
       operationId: getTag
       summary: Get desired display state for a single tag
-      description: Only returns the tag if it belongs to the authenticated store.
-      security:
-        - storeKey: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: Tag desired state
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Tag"
-        "400":
-          description: tag_id is not 12 hex characters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Missing or invalid X-Store-Key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "404":
-          description: Tag not found (or belongs to a different store)
+          description: Tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The tag ID is not 12 hexadecimal characters
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
     put:
       operationId: assignTag
-      summary: Create or update a tag's store and variation assignment
+      summary: Create or update a tag's variation assignment
       description: >
-        Admin-dashboard action, gated by Auth0 login (not X-Store-Key).
-        Creates the tag if it does not exist, owned by store_id. Pass
-        variation_id to assign a catalog variation; pass null to unassign.
-        A tag's store cannot be changed once set. content_hash is
-        recomputed immediately so the gateway picks up the change on its
-        next poll.
-      security:
-        - bearerAuth: []
+        Creates the tag if it does not exist. Pass variation_id to assign a
+        catalog variation; pass null to unassign. content_hash is recomputed
+        immediately; the gateway receives the change as a command.
+        A staff member with no store access gets 403, as does a user who
+        may not use the tag's store or the given store_id. The tag is never
+        deleted: undo a pairing by sending the previous variation_id (null
+        for a first pair), which unassigns it and keeps it registered.
       requestBody:
         required: true
         content:
@@ -194,22 +192,33 @@ paths:
             schema:
               $ref: "#/components/schemas/AssignBody"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: Tag after assignment
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Tag"
-        "400":
-          description: >
-            tag_id is not 12 hex characters, or the tag already belongs to a
-            different store
+        "404":
+          description: variation_id not found in catalog, or store_id not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "404":
-          description: store_id or variation_id not found
+        "422":
+          description: The tag ID is not 12 hexadecimal characters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >
+            The tag can't be used by this business, or the variation has no
+            price to show at this store (VARIABLE_PRICING). The detail says
+            which; it never reveals who owns a tag.
           content:
             application/json:
               schema:
@@ -224,15 +233,10 @@ paths:
           $ref: "#/components/schemas/TagId"
     post:
       operationId: locateTag
-      summary: Flash a tag's LED so staff can find it on the shelf
+      summary: Flash the label's LED so staff can find it on the shelf
       description: >
-        Admin-dashboard action, gated by Auth0 login. Queues a Locate
-        command on the gateway's command queue
-        (api/central-esl-api.yaml) — the flash never changes the screen
-        and sits outside the per-tag version ladder. The response is
-        immediate; the LED flashes on the gateway's next poll.
-      security:
-        - bearerAuth: []
+        Queues a Locate command. It never changes the tag's version or
+        content; a newer Locate replaces a pending one.
       requestBody:
         required: false
         content:
@@ -240,134 +244,561 @@ paths:
             schema:
               $ref: "#/components/schemas/LocateBody"
       responses:
-        "202":
-          description: Locate queued for the gateway's next poll
+        "200":
+          description: Locate command queued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LocateAccepted"
-        "400":
-          description: tag_id is not 12 hex characters, or seconds is out of range
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/LabelUpdateSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Tag not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: The tag ID is not 12 hexadecimal characters, or seconds is out of range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
-  /tags/{tag_id}/confirm:
+  /label-updates/{update_id}:
     parameters:
-      - name: tag_id
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/TagId"
-    post:
-      operationId: confirmTag
-      summary: Gateway reports what it successfully rendered
+      - { name: update_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getLabelUpdate
+      summary: Status of one label command (the pairing card polls this)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Command status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LabelUpdateSummary" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stores/{store_id}/labels:
+    parameters:
+      - { name: store_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listStoreLabels
+      summary: Every tag the store's Pi has heard, with assignment and battery state
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Tag inventory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoreLabelList" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stores/{store_id}/gateways:
+    parameters:
+      - { name: store_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listStoreGateways
+      summary: The store's gateway keys and access points (owners only, read-only)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Gateways and access points
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoreGateways" }
+        "404":
+          description: Not found (including objects of another business)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /me:
+    get:
+      operationId: getMe
+      summary: The signed-in user, their business and the stores they may use
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /stores:
+    get:
+      operationId: listStores
+      summary: Stores the signed-in user may use (empty for staff with no store access)
+      responses:
+        "200":
+          description: Stores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /stores/selection:
+    put:
+      operationId: selectStores
+      summary: Use these Square locations as stores (owners only; additive)
       description: >
-        Called by the gateway after it has pushed content to the physical
-        tag. Only works for a tag belonging to the authenticated store. The
-        service records the confirmation timestamp and battery level.
-      security:
-        - storeKey: []
+        Creates, links and renames stores for the chosen locations. Never
+        deletes a store. A store with no Square location is linked to the
+        first chosen location that has no store yet.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfirmBody"
+              $ref: "#/components/schemas/StoreSelection"
       responses:
-        "204":
-          description: Confirmation recorded
+        "200":
+          description: All stores after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreList"
         "400":
-          description: tag_id is not 12 hex characters
+          description: Empty selection or a location that isn't an active Square location
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
-          description: Missing or invalid X-Store-Key
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Square is not connected, or Square rejected the token (reconnect needed)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "404":
-          description: Tag not found (or belongs to a different store)
+        "502":
+          $ref: "#/components/responses/SquareUnavailable"
+
+  /staff:
+    get:
+      operationId: listStaff
+      summary: Everyone with access to this business (owners only)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: inviteStaff
+      summary: Invite a staff member by email (owners only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffInvite"
+      responses:
+        "201":
+          description: Invited; Cognito emails them a temporary password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffUser"
+        "400":
+          description: A store id does not belong to this business, or all_stores was combined with store_ids
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: This email can't be invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: The invitation could not be sent
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /staff/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateStaff
+      summary: Change a staff member's stores or disable/enable them (owners only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffUser"
+        "400":
+          description: A store id does not belong to this business, or all_stores was combined with store_ids
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such user in this business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: The identity provider call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /square/connection:
+    get:
+      operationId: getSquareConnection
+      summary: This business's Square connection status
+      responses:
+        "200":
+          description: Connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SquareConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /square/oauth/start:
+    post:
+      operationId: startSquareOAuth
+      summary: Begin connecting this business's Square account (owners only)
+      description: >
+        Also sets the esl_square_oauth_state cookie (HttpOnly, SameSite=Lax,
+        Path=/v1/square/oauth/callback, 10 minutes, Secure over https). The
+        callback accepts the state only from the browser holding that cookie.
+      responses:
+        "200":
+          description: Send the browser to authorize_url
+          headers:
+            Set-Cookie:
+              description: >
+                esl_square_oauth_state=<state>; HttpOnly; SameSite=Lax;
+                Path=/v1/square/oauth/callback; Max-Age=600 (plus Secure over https)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizeUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Square OAuth is not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /square/oauth/callback:
+    get:
+      operationId: squareOAuthCallback
+      summary: Square redirects here after the owner approves or declines
+      description: >
+        Public. The business comes from the single-use state, never from the
+        query. The state must match the esl_square_oauth_state cookie set by
+        startSquareOAuth, or it is not consumed and the code is not exchanged.
+        Always redirects to /settings/square?result=<result> and clears the
+        cookie.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: esl_square_oauth_state
+          in: cookie
+          required: false
+          description: The state set by startSquareOAuth in this browser.
+          schema:
+            type: string
+      responses:
+        "302":
+          description: >
+            Redirect to the dashboard. result is one of connected, error,
+            merchant_in_use, different_merchant.
+
+  /square/locations:
+    get:
+      operationId: listSquareLocations
+      summary: Active Square locations and the store each is linked to (owners only)
+      responses:
+        "200":
+          description: Locations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SquareLocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Square is not connected, or Square rejected the token (reconnect needed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          $ref: "#/components/responses/SquareUnavailable"
+
+  /api/label-updates/pending:
+    servers:
+      - url: /
+    get:
+      tags: [gateway]
+      security:
+        - gatewayKey: []
+      operationId: fetchPending
+      summary: Commands for a store whose central status is Pending, oldest first
+      parameters:
+        - name: storeId
+          in: query
+          required: true
+          schema: { type: string, example: STORE-001 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+        - name: wait
+          in: query
+          description: |
+            Long polling. Hold the request until at least one Pending command exists for the store, then answer at
+            once; answer an empty page at the deadline. The Pi sends 25. A server that ignores this parameter still
+            works: the Pi falls back to polling every 5 s.
+          schema: { type: integer, minimum: 0, maximum: 60, default: 0 }
+      responses:
+        '200':
+          description: "A page of commands. The Pi drains further pages when hasMore is true, allowing Accepted reports to settle between pages (default 1 s). Return an empty updates array and hasMore false when no work exists."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updates, hasMore]
+                properties:
+                  updates:
+                    type: array
+                    items: { $ref: '#/components/schemas/LabelUpdateCommand' }
+                  hasMore: { type: boolean }
+        '401':
+          description: Missing, unknown or revoked X-Api-Key.
+        '403':
+          description: The key does not match the store.
+
+  /api/label-updates/status:
+    servers:
+      - url: /
+    post:
+      tags: [gateway]
+      security:
+        - gatewayKey: []
+      operationId: reportStatus
+      summary: Batch of status reports from the Pi
+      description: |
+        Validate the entire batch before applying it; reject malformed reports or commands belonging to
+        another store without partially applying the batch. Count every valid submitted entry, including
+        duplicates and stale reports, in acceptedCount. Apply state only when statusAt is newer; a terminal
+        command must not regress to Dispatched when a delayed Accepted report arrives.
+        Reports are flushed on a signal or every 2 s, in batches of 100 by default (configurable up to 1000).
+        The durable outbox retains the entire batch on network errors, non-2xx responses, empty/malformed
+        acknowledgements or an acceptedCount different from the submitted count, including a larger count.
+        Retries back off from 5 s to at most 60 s. A lost response after commit causes the whole batch to repeat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storeId, reports]
+              properties:
+                storeId: { type: string }
+                reports:
+                  type: array
+                  items: { $ref: '#/components/schemas/LabelUpdateStatusReport' }
+      responses:
+        '200':
+          description: All reports acknowledged, including valid duplicates and stale entries. acceptedCount must equal the submitted batch size. Non-2xx, malformed or mismatched acknowledgements retain the whole batch for retry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acceptedCount]
+                properties:
+                  acceptedCount: { type: integer, minimum: 0 }
+        '401':
+          description: Missing, unknown or revoked X-Api-Key.
+        '403':
+          description: The key does not match the store.
+        '400':
+          description: Malformed or foreign command report; the entire batch is rejected without partial application.
+
+  /api/labels/telemetry:
+    servers:
+      - url: /
+    post:
+      tags: [gateway]
+      security:
+        - gatewayKey: []
+      operationId: reportTelemetry
+      summary: Label and access point telemetry snapshot from the Pi (contract 9.2)
+      description: |
+        Sent every 60 s with the labels whose state changed, every 15 min with every label (`full: true`), and
+        early (at most every 5 s) when an access point connects or disconnects or a label's low-battery flag flips.
+        The first report after a Pi restart is full.
+        These are default configurable intervals. Even with no changed labels, the routine report contains
+        an empty labels array and current access point state, providing a liveness signal.
+        Failed posts do not advance the last successful report time or change cursor; subsequent snapshots
+        include the union of pending changes. Telemetry is not a durable event outbox.
+        Upsert labels per (storeId, tagId) when lastSeenAt is newer than the stored value (or the stored value
+        is null). A full snapshot is not a deletion list: retain labels absent from it and their last-seen times.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelemetryReport' }
+      responses:
+        '200':
+          description: Accepted. Unlike status reports, telemetry accepts any successful 2xx response, including an empty body; acceptedCount is informational.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acceptedCount: { type: integer, minimum: 0 }
+        '204':
+          description: Telemetry accepted without a response body.
+        '401':
+          description: Missing, unknown or revoked X-Api-Key.
+        '403':
+          description: The key does not match the store.
+
 components:
   securitySchemes:
-    storeKey:
-      type: apiKey
-      in: header
-      name: X-Store-Key
-    bearerAuth:
+    cognitoBearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Auth0-issued access token, for the admin dashboard's own routes.
+      description: Cognito access token for the dashboard app client.
+    gatewayKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Per-store key issued by `esl admin add-gateway` (the Pi's `CentralApi:ApiKey`).
+
+  responses:
+    Unauthorized:
+      description: Not signed in, or the token is invalid or expired.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Signed in, but this user may not do this.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    SquareUnavailable:
+      description: Square returned an error other than an invalid token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   schemas:
     TagId:
       type: string
       pattern: "^[0-9A-F]{12}$"
-      description: >
-        12-character hex tag identifier (matches the ESL hardware id).
-        Case-insensitive on input, uppercase on output. Anything that is
-        not 12 hex characters is rejected with 400.
-
-    Store:
-      type: object
-      required: [id, name, square_location_id]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        square_location_id:
-          type: string
-          description: Square location this store maps to, for resolving per-location price overrides
-
-    StoreCreateBody:
-      type: object
-      required: [id, name, square_location_id]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        square_location_id:
-          type: string
-
-    StoreWithKey:
-      allOf:
-        - $ref: "#/components/schemas/Store"
-        - type: object
-          required: [api_key]
-          properties:
-            api_key:
-              type: string
-              description: Pass this as X-Store-Key. Shown only once.
+      description: 12-character uppercase hex tag identifier (the Pi's and the hardware's format)
 
     Tag:
       type: object
       required:
         - id
-        - store_id
         - content_hash
+        - signal
       properties:
         id:
           $ref: "#/components/schemas/TagId"
-        store_id:
-          type: string
         variation_id:
           type: string
           nullable: true
@@ -385,12 +816,7 @@ components:
         price:
           type: integer
           nullable: true
-          description: >
-            Price in smallest currency unit (e.g. cents), resolved for this
-            tag's store (Square location price overrides applied). Null
-            when pricing_type is VARIABLE_PRICING — the gateway should
-            render placeholder text (e.g. "<name> — See Register") for
-            those, not a price template.
+          description: Price in smallest currency unit (e.g. cents). Null when VARIABLE_PRICING.
         pricing_type:
           type: string
           nullable: true
@@ -399,55 +825,122 @@ components:
           type: string
           nullable: true
           description: >
-            SHA-256 of the canonical projection. The gateway uses this to detect
-            drift without re-fetching every tag's full content on every poll.
-            Null means the tag has no variation assigned — the gateway should
-            show its unassigned screen rather than attempt to render product
-            content. Every tag without a variation reports null here, whether
-            it was never assigned or explicitly unassigned.
-        last_pushed_at:
-          type: string
-          format: date-time
-          nullable: true
+            SHA-256 of the canonical projection. Used by this service to detect
+            changes; it is never sent to the gateway.
         last_confirmed_at:
           type: string
           format: date-time
           nullable: true
-        battery_pct:
+        version:
           type: integer
-          nullable: true
-          minimum: 0
-          maximum: 100
+          description: Last display version issued for this tag (0 = never sent).
+        store_id:
+          type: string
+          format: uuid
+        latest_update:
+          oneOf:
+            - $ref: "#/components/schemas/LabelUpdateSummary"
+            - type: "null"
+        low_battery:
+          type: [boolean, "null"]
+          description: From the store Pi's telemetry; null if the Pi has never reported this tag.
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
+          description: Last time any access point heard this label.
         signal:
           type: string
           enum: [ok, weak, out_of_range, never_heard]
           description: >
-            Whether a gateway's access points can currently hear this
-            label, derived from the telemetry they report. `never_heard`
-            means no access point has ever listed it — usually a tag id
-            that does not match any real hardware. `out_of_range` means it
-            was heard once but not within the last hour. `weak` means
-            heard recently at -70 dBm or worse.
+            Whether the store's access points can currently hear this label,
+            derived from Pi telemetry. `never_heard` means no access point has
+            ever listed it, usually a tag id that matches no real hardware.
+            `out_of_range` means heard once but not within the last hour.
+            `weak` means heard recently at -70 dBm or worse.
         rf_power:
-          type: integer
-          nullable: true
+          type: [integer, "null"]
           description: Last reported signal strength in dBm. Null if never heard.
-        last_seen_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: Last time any access point heard this label.
         battery_volts:
-          type: number
-          nullable: true
+          type: [number, "null"]
           description: >
-            Battery reading in volts, converted from the raw tenths-of-a-volt
-            byte the hardware reports. Not a percentage — no discharge curve
-            is assumed.
+            Battery reading in volts, from the raw tenths-of-a-volt byte the
+            hardware reports. Not a percentage; no discharge curve is assumed.
+
+    LabelUpdateSummary:
+      type: object
+      required: [update_id, action, status]
+      properties:
+        update_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [Update, Unassign, Locate]
+        status:
+          type: string
+          enum: [Pending, Dispatched, Succeeded, Failed, Superseded]
+        failure_code:
+          type: [string, "null"]
+        retryable:
+          type: [boolean, "null"]
+        status_at:
+          type: [string, "null"]
+          format: date-time
+
+    StoreLabel:
+      type: object
+      required: [tag_id, low_battery, assigned]
+      properties:
+        tag_id:
+          $ref: "#/components/schemas/TagId"
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
         low_battery:
           type: boolean
-          nullable: true
-          description: Low-battery flag as computed by the gateway.
+        battery:
+          type: [integer, "null"]
+          description: Raw vendor byte, not a percentage.
+        assigned:
+          type: boolean
+        variation_id:
+          type: [string, "null"]
+
+    StoreLabelList:
+      type: object
+      required: [labels]
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreLabel"
+
+    StoreGateways:
+      type: object
+      required: [gateways, access_points]
+      properties:
+        gateways:
+          type: array
+          items:
+            type: object
+            required: [id, name, key_prefix, revoked]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              key_prefix: { type: string }
+              last_seen_at: { type: [string, "null"], format: date-time }
+              revoked: { type: boolean }
+        access_points:
+          type: array
+          items:
+            type: object
+            required: [ap_id, connected, stale, reported_at]
+            properties:
+              ap_id: { type: string }
+              connected: { type: boolean }
+              stale: { type: boolean }
+              last_heartbeat_at: { type: [string, "null"], format: date-time }
+              reported_at: { type: string, format: date-time }
 
     TagList:
       type: object
@@ -487,6 +980,51 @@ components:
         pricing_type:
           type: string
           enum: [FIXED_PRICING, VARIABLE_PRICING]
+        gtin:
+          type: string
+          nullable: true
+          description: Square's UPC/GTIN field.
+        currency:
+          type: string
+          nullable: true
+
+    ClassifyResult:
+      type: object
+      required: [kind, normalized]
+      properties:
+        kind:
+          type: string
+          enum: [tag, product]
+        normalized:
+          type: string
+          description: The 12-hex tag ID for tags; the trimmed code for products.
+
+    VariationWithStorePrice:
+      type: object
+      required: [id, item_id, name, variation_name, pricing_type]
+      properties:
+        id: { type: string }
+        item_id: { type: string }
+        name: { type: string }
+        variation_name: { type: string }
+        sku: { type: string, nullable: true }
+        gtin: { type: string, nullable: true }
+        price:
+          type: integer
+          nullable: true
+          description: Price at this store in the smallest currency unit. Null when VARIABLE_PRICING.
+        pricing_type:
+          type: string
+          enum: [FIXED_PRICING, VARIABLE_PRICING]
+        currency: { type: string, nullable: true }
+
+    LookupResult:
+      type: object
+      required: [matches]
+      properties:
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/VariationWithStorePrice" }
 
     VariationList:
       type: object
@@ -500,15 +1038,19 @@ components:
 
     AssignBody:
       type: object
-      required: [store_id]
       properties:
-        store_id:
-          type: string
-          description: Store this tag belongs to. Immutable once the tag is created.
         variation_id:
           type: string
           nullable: true
           description: Variation to assign. Null to unassign.
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Store the tag was scanned in. New tags are registered there; an
+            existing tag moves there. Null keeps the current store (new tags go
+            to the user's first store).
 
     LocateBody:
       type: object
@@ -516,37 +1058,8 @@ components:
         seconds:
           type: integer
           minimum: 1
-          maximum: 65535
-          description: >
-            Flash duration. Omit for the gateway's default (30s). The
-            gateway caps this at its own configured maximum (300s).
-
-    LocateAccepted:
-      type: object
-      required: [update_id, tag_id]
-      properties:
-        update_id:
-          type: string
-          description: Idempotency key of the queued Locate command
-        tag_id:
-          $ref: "#/components/schemas/TagId"
-        seconds:
-          type: integer
-          nullable: true
-
-    ConfirmBody:
-      type: object
-      required:
-        - content_hash
-      properties:
-        content_hash:
-          type: string
-          description: Hash of what was actually rendered, for drift detection
-        battery_pct:
-          type: integer
-          nullable: true
-          minimum: 0
-          maximum: 100
+          maximum: 300
+          default: 30
 
     Health:
       type: object
@@ -564,3 +1077,396 @@ components:
       properties:
         detail:
           type: string
+
+    Store:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    SquareLocation:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    SquareLocationList:
+      type: object
+      required: [locations]
+      properties:
+        locations:
+          type: array
+          items:
+            $ref: "#/components/schemas/SquareLocation"
+
+    StoreSelection:
+      type: object
+      required: [location_ids]
+      properties:
+        location_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+
+    StoreList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Store"
+
+    Me:
+      type: object
+      required: [user_id, email, role, business, stores]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, staff]
+        business:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        stores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Store"
+
+    StaffUser:
+      type: object
+      required: [id, email, role, disabled, all_stores, store_ids]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, staff]
+        disabled:
+          type: boolean
+        all_stores:
+          type: boolean
+          description: >
+            Staff only. True means every store in the business, including
+            stores added later, and store_ids is then empty. Always false for
+            owners, who use every store regardless.
+        store_ids:
+          type: array
+          description: >
+            The stores a staff member may use when all_stores is false. Empty
+            with all_stores false means no store access.
+          items:
+            type: string
+            format: uuid
+
+    StaffList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffUser"
+
+    StaffInvite:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        all_stores:
+          type: boolean
+          description: >
+            Every store, including stores added later. Omitted means false.
+            Can't be combined with a non-empty store_ids.
+        store_ids:
+          type: array
+          description: >
+            The stores the new staff member may use. Omitted or empty with
+            all_stores false means no store access until an owner grants one.
+          items:
+            type: string
+            format: uuid
+
+    StaffUpdate:
+      type: object
+      description: >
+        Sending all_stores or store_ids replaces the staff member's store
+        access. A field left out counts as false or empty, so
+        {"all_stores": false} alone leaves them with no store access.
+        all_stores true with a non-empty store_ids is a 400.
+      properties:
+        all_stores:
+          type: boolean
+        store_ids:
+          type: array
+          description: Replaces allowed stores. Empty with all_stores false means no store access.
+          items:
+            type: string
+            format: uuid
+        disabled:
+          type: boolean
+
+    SquareConnection:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [not_connected, active, needs_reconnect, revoked]
+        merchant_id:
+          type: string
+          nullable: true
+
+    AuthorizeUrl:
+      type: object
+      required: [authorize_url]
+      properties:
+        authorize_url:
+          type: string
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string, description: 'Nonnegative decimal amount encoded as a string, not a JSON number.', example: "219.99" }
+        currency: { type: string, minLength: 3, maxLength: 3, description: ISO 4217 currency code., example: USD }
+
+    Display:
+      type: object
+      description: Semantic data aligned with the Square catalog model; the Pi owns the layout.
+      required: [itemName, price]
+      properties:
+        itemName: { type: string, minLength: 1, description: Square item name; must contain non-whitespace text. }
+        variationName: { type: [string, 'null'], description: 'Square variation name as-is. Not rendered when empty, Regular (case-insensitive), or equal to itemName.' }
+        price: { $ref: '#/components/schemas/Money' }
+        sku: { type: [string, 'null'] }
+        category: { type: [string, 'null'], description: Only if the integration already has it; stored, not rendered. }
+        description: { type: [string, 'null'], description: Only if the integration already has it; stored, not rendered. }
+
+    LabelUpdateCommand:
+      type: object
+      description: |
+        Central sends semantic display data; the Pi renders images and barcodes. Update and Unassign share
+        a strictly increasing per-label version ladder. A version at or below the highest successfully applied
+        version is Superseded. Newer queued display work can supersede older queued work; claimed/in-flight
+        work completes before another command is sent to that label.
+        Locate ignores version and does not change or participate in the display version ladder. It waits
+        behind in-flight work for the same label; a newer Locate replaces an older queued Locate.
+        Schemas describe canonical commands central should emit. The Pi tolerates missing createdAt
+        (uses receipt time) and productId, and treats a blank/null action as Update. Invalid commands with
+        a parseable updateId are reported as Failed/InvalidCommand when they can be deserialized;
+        a missing or unparseable updateId cannot be correlated and is skipped.
+      required: [updateId, storeId, tagId, createdAt]
+      allOf:
+        - if:
+            properties:
+              action: { const: Locate }
+            required: [action]
+          then: {}
+          else:
+            required: [version]
+            properties:
+              version: { type: integer, format: int64 }
+        - if:
+            properties:
+              action: { const: Update }
+          then:
+            required: [productId, display]
+            properties:
+              productId: { type: string, minLength: 1 }
+              display: { $ref: '#/components/schemas/Display' }
+      properties:
+        updateId: { type: string, format: uuid, description: Idempotency key; never reused for different content. }
+        storeId: { type: string, description: Must equal the Pi's configured store; anything else is rejected as `InvalidCommand`. }
+        tagId: { type: string, pattern: '^[0-9A-Fa-f]{12}$', description: The physical label. }
+        action:
+          type: string
+          enum: [Update, Unassign, Locate]
+          default: Update
+          description: "`Update` paints the product template; `Unassign` paints the barcode screen; `Locate` flashes the LED."
+        version:
+          type: [integer, 'null']
+          format: int64
+          description: Strictly increasing per tagId; required for Update and Unassign, ignored for Locate.
+        productId: { type: [string, 'null'], description: Square catalog object id of the variation, for logs and reports. }
+        createdAt: { type: string, format: date-time }
+        display:
+          oneOf:
+            - $ref: '#/components/schemas/Display'
+            - type: 'null'
+          description: Required for Update; omitted or null for Unassign and Locate (ignored by the Pi).
+        seconds:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 65535
+          description: Locate only. Flash duration in seconds; Pi default 30, capped at its configured maximum (default 300). Does not change the displayed image.
+      examples:
+        - updateId: 7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21
+          storeId: STORE-001
+          tagId: 840001282A7E
+          version: 42
+          productId: SQ-VARIATION-8H2K
+          createdAt: '2026-09-05T14:03:00Z'
+          display:
+            itemName: 2024 Topps Chrome Baseball
+            variationName: Hobby Box
+            price: { amount: "219.99", currency: USD }
+            sku: TC24-HBY
+        - updateId: 0d7f4c3e-5f1a-4c8b-9b7e-2a6d8e1f3c44
+          storeId: STORE-001
+          tagId: 840001282A7E
+          version: 44
+          createdAt: '2026-09-06T09:00:00Z'
+          action: Unassign
+        - updateId: 3c1f6a2e-7d0b-4e9a-8b1c-5f2d9e7a1b44
+          storeId: STORE-001
+          tagId: 840001282A7E
+          action: Locate
+          seconds: 30
+          createdAt: '2026-09-06T14:03:00Z'
+
+    Diagnostics:
+      type: object
+      required: [rfPower, battery, temperature, statusByte, lowBattery]
+      properties:
+        rfPower: { type: integer, description: dBm; -256 means the label did not answer. }
+        battery: { type: integer, description: 'Raw vendor battery byte; unit is unconfirmed (likely tenths of a volt). Not a percentage; 0 means no data.' }
+        temperature: { type: integer }
+        statusByte: { type: integer }
+        lowBattery: { type: boolean }
+
+    LabelUpdateStatusReport:
+      type: object
+      required: [updateId, tagId, action, status, statusAt, attempt]
+      properties:
+        updateId: { type: string, format: uuid }
+        tagId: { type: string }
+        version: { type: [integer, 'null'], format: int64, description: null for Locate. }
+        action: { type: string, enum: [Update, Unassign, Locate] }
+        status:
+          type: string
+          enum: [Accepted, Succeeded, Failed, Superseded]
+          description: |
+            Only Accepted and terminal states cross the wire. Accepted means durably stored, not delivered;
+            Queued, Dispatching and SentToAp are local states mapped to Accepted on duplicate reports.
+            Succeeded confirms the display update for Update/Unassign, or the LED command for Locate.
+            Failed and Superseded are terminal; Superseded is not an error. Immediate terminal outcomes
+            may arrive without an earlier Accepted report.
+        statusAt: { type: string, format: date-time }
+        attempt: { type: integer, minimum: 0, description: Attempt counter; may be zero before hardware execution. }
+        apId: { type: [string, 'null'] }
+        failureCode:
+          type: [string, 'null']
+          enum: [LabelNoResponse, ApUnavailable, ApTimeout, ApQueueFull, LabelRejectedKey, LabelHardwareError, RenderError, InvalidCommand, InternalError, null]
+        failureMessage: { type: [string, 'null'], description: Failure details or supersession reason; null otherwise. }
+        retryable:
+          type: [boolean, 'null']
+          description: |
+            Null for non-failures. True for LabelNoResponse, ApUnavailable, ApTimeout and ApQueueFull;
+            false for LabelRejectedKey, LabelHardwareError, RenderError, InvalidCommand and InternalError.
+            Central owns business retries: issue a new updateId and, for display actions, a newer version.
+            Re-pending the same terminal ID only retrieves its stored outcome.
+        knownVersion:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Superseded at intake only: the highest version this Pi had already applied or was holding for
+            the label when it rejected this one as not newer. Null otherwise. When it is not lower than
+            central's latest version, central's ladder is behind the Pi's; central resends the current
+            state once, above knownVersion. Additive; older Pis omit it.
+        diagnostics:
+          oneOf:
+            - $ref: '#/components/schemas/Diagnostics'
+            - type: 'null'
+      examples:
+        - updateId: 7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21
+          tagId: 840001282A7E
+          version: 42
+          action: Update
+          status: Succeeded
+          statusAt: '2026-09-05T14:03:41Z'
+          attempt: 2
+          apId: 0CNT
+          failureCode: null
+          failureMessage: null
+          retryable: null
+          diagnostics: { rfPower: -58, battery: 30, temperature: 22, statusByte: 129, lowBattery: false }
+
+    LabelTelemetry:
+      type: object
+      required: [tagId, firstSeenAt, lowBattery]
+      properties:
+        tagId: { type: string }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: [string, 'null'], format: date-time }
+        lastSeenApId: { type: [string, 'null'] }
+        rfPower: { type: [integer, 'null'], description: dBm of the last sighting. }
+        battery: { type: [integer, 'null'], description: 'Raw vendor byte, not a percentage; unit unconfirmed (likely tenths of a volt). A fresh cell has been observed at about 31.' }
+        lowBattery: { type: boolean, description: The Pi's judgement with its configured threshold (25). }
+        temperature: { type: [integer, 'null'] }
+        statusByte: { type: [integer, 'null'] }
+        firmwareVersion: { type: [integer, 'null'] }
+        type: { type: [integer, 'null'] }
+        size: { type: [integer, 'null'] }
+        color: { type: [integer, 'null'] }
+        factory: { type: [integer, 'null'] }
+        lastSuccessApId: { type: [string, 'null'] }
+        lastSuccessAt: { type: [string, 'null'], format: date-time }
+        lastResultAt: { type: [string, 'null'], format: date-time }
+        lastResultSuccess: { type: [boolean, 'null'] }
+
+    AccessPointTelemetry:
+      type: object
+      required: [apId, connected, stale, heartbeatIntervalSeconds, waitCount, sendCount]
+      properties:
+        apId: { type: string }
+        connected: { type: boolean }
+        stale: { type: boolean, description: Connected but no heartbeat within the configured threshold (default three intervals); treat prolonged staleness as offline. }
+        connectedAt: { type: [string, 'null'], format: date-time }
+        disconnectedAt: { type: [string, 'null'], format: date-time }
+        lastHeartbeatAt: { type: [string, 'null'], format: date-time }
+        heartbeatIntervalSeconds: { type: integer }
+        apVersion: { type: [string, 'null'] }
+        ip: { type: [string, 'null'] }
+        waitCount: { type: integer }
+        sendCount: { type: integer }
+
+    TelemetryReport:
+      type: object
+      required: [storeId, reportedAt, full, labels, accessPoints]
+      properties:
+        storeId: { type: string }
+        reportedAt: { type: string, format: date-time }
+        full: { type: boolean, description: true when `labels` holds every label the Pi knows. }
+        labels:
+          type: array
+          items: { $ref: '#/components/schemas/LabelTelemetry' }
+        accessPoints:
+          type: array
+          items: { $ref: '#/components/schemas/AccessPointTelemetry' }

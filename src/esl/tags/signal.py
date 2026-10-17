@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from esl.tags.models import LabelTelemetry
+from esl.gateway.models import LabelTelemetry
 
 SIGNAL_OK = "ok"
 SIGNAL_WEAK = "weak"

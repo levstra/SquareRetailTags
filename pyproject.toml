@@ -16,8 +16,13 @@ dependencies = [
     "redis>=5.0",
     "squareup>=44,<45",
     "httpx>=0.28",
-    "pyjwt[crypto]>=2.9",
+    "pyjwt[crypto]>=2.10",
+    "cryptography>=46",
+    "boto3>=1.35",
 ]
+
+[project.scripts]
+esl = "esl.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -31,4 +36,6 @@ packages = ["src/esl"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]

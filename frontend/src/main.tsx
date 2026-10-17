@@ -1,25 +1,31 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Auth0Provider } from "@auth0/auth0-react";
+import type { User } from "oidc-client-ts";
+import { AuthProvider } from "react-oidc-context";
 import "./index.css";
-import App from "./App.tsx";
+import { RequireAuth } from "./auth/RequireAuth";
+import { userManager } from "./auth/userManager";
+import { Root } from "./Root";
+import { replacePath } from "./router";
 
 const queryClient = new QueryClient();
 
+// Drop ?code=&state= and go back to the page that asked for sign-in.
+const onSigninCallback = (user: User | undefined) => {
+  const returnTo = (user?.state as { returnTo?: string } | undefined)?.returnTo;
+  const safe = returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") && returnTo !== "/auth/callback";
+  replacePath(safe ? returnTo : "/");
+};
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Auth0Provider
-      domain={import.meta.env.VITE_AUTH0_DOMAIN}
-      clientId={import.meta.env.VITE_AUTH0_CLIENT_ID}
-      authorizationParams={{
-        redirect_uri: window.location.origin,
-        audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-      }}
-    >
+    <AuthProvider userManager={userManager} onSigninCallback={onSigninCallback}>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <RequireAuth>
+          <Root />
+        </RequireAuth>
       </QueryClientProvider>
-    </Auth0Provider>
+    </AuthProvider>
   </StrictMode>,
 );

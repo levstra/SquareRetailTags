@@ -34,13 +34,16 @@ Call the API through the typed client in `src/api/client.ts`
 
 - Function components with hooks. No class components.
 - Server state lives in TanStack Query, not `useState` or context.
-- The "Products" view (item-first: browse catalog items, click one to see
-  and manage the tags assigned to it) is the primary surface — that's the
-  everyday "add/find a tag" workflow. The "All Tags" table is secondary,
-  kept for the one thing item-first browsing is bad at: fleet-wide battery
-  monitoring. Its default sort stays battery ascending — the recurring
-  operational task is "which tags need batteries" — don't change that
-  default just because it's no longer the landing view.
+- Two views. **Labels** is the landing view: tags needing a person (never
+  heard, not responding, failed update, low battery, weak signal; see
+  `lib/format.ts::tagStatus`) come first, worst first, then the rest;
+  battery ascending within each group, because the recurring task is
+  "which tags need batteries". **Products** is the item-first workflow:
+  browse catalog items, open one to see and manage its labels.
+- Colors come only from the theme tokens in `src/index.css` (`text-ink`,
+  `bg-surface`, `text-ok`/`warn`/`bad`, ...), never raw palette classes like
+  `text-gray-500`: the light/dark switch only re-colors tokens. Reuse the
+  primitives in `src/ui.tsx`.
 - Money arrives as integer cents. Format at the render boundary only.
 - Dev requests go through the Vite proxy (`/v1` → localhost:8001).
   Never hardcode an absolute backend URL; production is same-origin.

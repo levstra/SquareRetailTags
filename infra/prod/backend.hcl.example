@@ -1,0 +1,6 @@
+# Copy to backend.hcl (git-ignored) and fill in the bucket from infra/bootstrap.
+bucket       = "esl-tfstate-<account-id>"
+key          = "prod/terraform.tfstate"
+region       = "us-west-2"
+encrypt      = true
+use_lockfile = true

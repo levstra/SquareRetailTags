@@ -1,6 +1,6 @@
 from typing import TypedDict
 
-from esl.catalog.models import CatalogItem, CatalogVariation
+from esl.catalog.models import CatalogItem, CatalogVariation, VariationLocationPrice
 
 
 class Projection(TypedDict):
@@ -12,19 +12,21 @@ class Projection(TypedDict):
 
 
 def build_projection(
-    item: CatalogItem, variation: CatalogVariation, price: int | None
+    item: CatalogItem,
+    variation: CatalogVariation,
+    override: VariationLocationPrice | None = None,
 ) -> Projection:
-    """`price` must already be resolved for the tag's store — see
-    `esl.catalog.pricing.resolve_price`. This function never reads
-    `variation.price` directly so a caller can't accidentally use the
-    flat, non-location-aware price.
-    """
+    # A location override replaces price and pricing type only. The field set
+    # never changes, so tags without an override keep byte-identical hashes.
+    price, pricing_type = variation.price, variation.pricing_type
+    if override is not None:
+        price, pricing_type = override.price, override.pricing_type
     return Projection(
         name=item.name,
         variation_name=variation.variation_name,
         sku=variation.sku,
         price=price,
-        pricing_type=variation.pricing_type,
+        pricing_type=pricing_type,
     )
 
 

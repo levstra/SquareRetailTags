@@ -1,8 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { formatPrice, variationLabel } from "../lib/format";
-import { TAG_ID_RE, useStores, useVariations, type Variation } from "../lib/queries";
+import {
+  TAG_ID_RE,
+  errorMessage,
+  useStores,
+  useVariations,
+  type Variation,
+} from "../lib/queries";
 import { Button, Field, Modal, Select, TextInput } from "../ui";
 
 export type AssignTarget = {
@@ -26,6 +32,9 @@ export function AssignModal({
 
   const { data: varData } = useVariations();
   const { data: storeData } = useStores();
+  // Most users work in one store; don't make them pick it.
+  const onlyStore = storeData?.length === 1 ? storeData[0].id : "";
+  const effectiveStoreId = storeId || onlyStore;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -33,20 +42,20 @@ export function AssignModal({
       if (!TAG_ID_RE.test(id)) {
         throw new Error("Tag ID must be exactly 12 uppercase hex characters");
       }
-      if (!storeId) {
+      if (!effectiveStoreId) {
         throw new Error("Store is required");
       }
-      const { error } = await api.PUT("/tags/{tag_id}", {
+      const { error, response } = await api.PUT("/tags/{tag_id}", {
         params: { path: { tag_id: id } },
-        body: { store_id: storeId, variation_id: variationId || null },
+        body: { store_id: effectiveStoreId, variation_id: variationId || null },
       });
-      if (error) throw error;
+      if (!response.ok) throw new ApiError(response, error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       onClose();
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e) => setError(errorMessage(e)),
   });
 
   const variations = varData ?? [];
@@ -91,7 +100,7 @@ export function AssignModal({
 
         <Field label="Store">
           <Select
-            value={storeId}
+            value={effectiveStoreId}
             disabled={!!initial?.storeId}
             onChange={(e) => setStoreId(e.target.value)}
           >

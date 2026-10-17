@@ -38,39 +38,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/stores": {
+    "/scan/classify": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List all stores */
-        get: operations["listStores"];
+        /** Decide whether a scanned code is a shelf tag or a product */
+        get: operations["classifyScan"];
         put?: never;
-        /**
-         * Register a new store
-         * @description Returns the generated api_key exactly once. Hand it to that store's gateway operator to configure as the X-Store-Key header — it cannot be retrieved again afterward.
-         */
-        post: operations["createStore"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/tags": {
+    "/catalog/lookup": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List tags across all stores, for the admin dashboard
-         * @description Gated by Auth0 login, not X-Store-Key — the dashboard isn't a gateway and has no per-store key; it authenticates the human instead. Optionally narrow to one store.
-         */
-        get: operations["listTagsAdmin"];
+        /** Find variations by scanned GTIN, then SKU, available at a store */
+        get: operations["lookupProduct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -87,8 +80,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all tags for the requesting store
-         * @description The gateway polls this endpoint to discover which of its own store's tags need updating. X-Store-Key identifies the store; only that store's tags are returned. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
+         * List all tags with their desired display state
+         * @description Tags in the stores the signed-in user may use (every store for owners and all-stores staff). A staff member with no store access gets an empty list. This is the dashboard's view; the Pi gateway does not use it (see the Pi contract).
          */
         get: operations["listTags"];
         put?: never;
@@ -108,14 +101,11 @@ export interface paths {
             };
             cookie?: never;
         };
-        /**
-         * Get desired display state for a single tag
-         * @description Only returns the tag if it belongs to the authenticated store.
-         */
+        /** Get desired display state for a single tag */
         get: operations["getTag"];
         /**
-         * Create or update a tag's store and variation assignment
-         * @description Admin-dashboard action, gated by Auth0 login (not X-Store-Key). Creates the tag if it does not exist, owned by store_id. Pass variation_id to assign a catalog variation; pass null to unassign. A tag's store cannot be changed once set. content_hash is recomputed immediately so the gateway picks up the change on its next poll.
+         * Create or update a tag's variation assignment
+         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately; the gateway receives the change as a command. A staff member with no store access gets 403, as does a user who may not use the tag's store or the given store_id. The tag is never deleted: undo a pairing by sending the previous variation_id (null for a first pair), which unassigns it and keeps it registered.
          */
         put: operations["assignTag"];
         post?: never;
@@ -137,8 +127,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Flash a tag's LED so staff can find it on the shelf
-         * @description Admin-dashboard action, gated by Auth0 login. Queues a Locate command on the gateway's command queue (api/central-esl-api.yaml) — the flash never changes the screen and sits outside the per-tag version ladder. The response is immediate; the LED flashes on the gateway's next poll.
+         * Flash the label's LED so staff can find it on the shelf
+         * @description Queues a Locate command. It never changes the tag's version or content; a newer Locate replaces a pending one.
          */
         post: operations["locateTag"];
         delete?: never;
@@ -147,22 +137,294 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tags/{tag_id}/confirm": {
+    "/label-updates/{update_id}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                tag_id: components["schemas"]["TagId"];
+                update_id: string;
+            };
+            cookie?: never;
+        };
+        /** Status of one label command (the pairing card polls this) */
+        get: operations["getLabelUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores/{store_id}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        /** Every tag the store's Pi has heard, with assignment and battery state */
+        get: operations["listStoreLabels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores/{store_id}/gateways": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        /** The store's gateway keys and access points (owners only, read-only) */
+        get: operations["listStoreGateways"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user, their business and the stores they may use */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stores the signed-in user may use (empty for staff with no store access) */
+        get: operations["listStores"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stores/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Use these Square locations as stores (owners only; additive)
+         * @description Creates, links and renames stores for the chosen locations. Never deletes a store. A store with no Square location is linked to the first chosen location that has no store yet.
+         */
+        put: operations["selectStores"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Everyone with access to this business (owners only) */
+        get: operations["listStaff"];
+        put?: never;
+        /** Invite a staff member by email (owners only) */
+        post: operations["inviteStaff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/staff/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change a staff member's stores or disable/enable them (owners only) */
+        patch: operations["updateStaff"];
+        trace?: never;
+    };
+    "/square/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This business's Square connection status */
+        get: operations["getSquareConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/square/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /**
-         * Gateway reports what it successfully rendered
-         * @description Called by the gateway after it has pushed content to the physical tag. Only works for a tag belonging to the authenticated store. The service records the confirmation timestamp and battery level.
+         * Begin connecting this business's Square account (owners only)
+         * @description Also sets the esl_square_oauth_state cookie (HttpOnly, SameSite=Lax, Path=/v1/square/oauth/callback, 10 minutes, Secure over https). The callback accepts the state only from the browser holding that cookie.
          */
-        post: operations["confirmTag"];
+        post: operations["startSquareOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/square/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Square redirects here after the owner approves or declines
+         * @description Public. The business comes from the single-use state, never from the query. The state must match the esl_square_oauth_state cookie set by startSquareOAuth, or it is not consumed and the code is not exchanged. Always redirects to /settings/square?result=<result> and clears the cookie.
+         */
+        get: operations["squareOAuthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/square/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Square locations and the store each is linked to (owners only) */
+        get: operations["listSquareLocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/label-updates/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Commands for a store whose central status is Pending, oldest first */
+        get: operations["fetchPending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/label-updates/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch of status reports from the Pi
+         * @description Validate the entire batch before applying it; reject malformed reports or commands belonging to
+         *     another store without partially applying the batch. Count every valid submitted entry, including
+         *     duplicates and stale reports, in acceptedCount. Apply state only when statusAt is newer; a terminal
+         *     command must not regress to Dispatched when a delayed Accepted report arrives.
+         *     Reports are flushed on a signal or every 2 s, in batches of 100 by default (configurable up to 1000).
+         *     The durable outbox retains the entire batch on network errors, non-2xx responses, empty/malformed
+         *     acknowledgements or an acceptedCount different from the submitted count, including a larger count.
+         *     Retries back off from 5 s to at most 60 s. A lost response after commit causes the whole batch to repeat.
+         */
+        post: operations["reportStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/labels/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Label and access point telemetry snapshot from the Pi (contract 9.2)
+         * @description Sent every 60 s with the labels whose state changed, every 15 min with every label (`full: true`), and
+         *     early (at most every 5 s) when an access point connects or disconnects or a label's low-battery flag flips.
+         *     The first report after a Pi restart is full.
+         *     These are default configurable intervals. Even with no changed labels, the routine report contains
+         *     an empty labels array and current access point state, providing a liveness signal.
+         *     Failed posts do not advance the last successful report time or change cursor; subsequent snapshots
+         *     include the union of pending changes. Telemetry is not a durable event outbox.
+         *     Upsert labels per (storeId, tagId) when lastSeenAt is newer than the stored value (or the stored value
+         *     is null). A full snapshot is not a deletion list: retain labels absent from it and their last-seen times.
+         */
+        post: operations["reportTelemetry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -173,59 +435,90 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description 12-character hex tag identifier (matches the ESL hardware id). Case-insensitive on input, uppercase on output. Anything that is not 12 hex characters is rejected with 400. */
+        /** @description 12-character uppercase hex tag identifier (the Pi's and the hardware's format) */
         TagId: string;
-        Store: {
-            id: string;
-            name: string;
-            /** @description Square location this store maps to, for resolving per-location price overrides */
-            square_location_id: string;
-        };
-        StoreCreateBody: {
-            id: string;
-            name: string;
-            square_location_id: string;
-        };
-        StoreWithKey: components["schemas"]["Store"] & {
-            /** @description Pass this as X-Store-Key. Shown only once. */
-            api_key: string;
-        };
         Tag: {
             id: components["schemas"]["TagId"];
-            store_id: string;
             /** @description Square catalog variation ID this tag is assigned to */
             variation_id?: string | null;
             /** @description Product name from the Square catalog */
             name?: string | null;
             variation_name?: string | null;
             sku?: string | null;
-            /** @description Price in smallest currency unit (e.g. cents), resolved for this tag's store (Square location price overrides applied). Null when pricing_type is VARIABLE_PRICING — the gateway should render placeholder text (e.g. "<name> — See Register") for those, not a price template. */
+            /** @description Price in smallest currency unit (e.g. cents). Null when VARIABLE_PRICING. */
             price?: number | null;
             /** @enum {string|null} */
             pricing_type?: "FIXED_PRICING" | "VARIABLE_PRICING" | null;
-            /** @description SHA-256 of the canonical projection. The gateway uses this to detect drift without re-fetching every tag's full content on every poll. Null means the tag has no variation assigned — the gateway should show its unassigned screen rather than attempt to render product content. Every tag without a variation reports null here, whether it was never assigned or explicitly unassigned. */
+            /** @description SHA-256 of the canonical projection. Used by this service to detect changes; it is never sent to the gateway. */
             content_hash: string | null;
             /** Format: date-time */
-            last_pushed_at?: string | null;
-            /** Format: date-time */
             last_confirmed_at?: string | null;
-            battery_pct?: number | null;
-            /**
-             * @description Whether a gateway's access points can currently hear this label, derived from the telemetry they report. `never_heard` means no access point has ever listed it — usually a tag id that does not match any real hardware. `out_of_range` means it was heard once but not within the last hour. `weak` means heard recently at -70 dBm or worse.
-             * @enum {string}
-             */
-            signal?: "ok" | "weak" | "out_of_range" | "never_heard";
-            /** @description Last reported signal strength in dBm. Null if never heard. */
-            rf_power?: number | null;
+            /** @description Last display version issued for this tag (0 = never sent). */
+            version?: number;
+            /** Format: uuid */
+            store_id?: string;
+            latest_update?: components["schemas"]["LabelUpdateSummary"] | null;
+            /** @description From the store Pi's telemetry; null if the Pi has never reported this tag. */
+            low_battery?: boolean | null;
             /**
              * Format: date-time
              * @description Last time any access point heard this label.
              */
             last_seen_at?: string | null;
-            /** @description Battery reading in volts, converted from the raw tenths-of-a-volt byte the hardware reports. Not a percentage — no discharge curve is assumed. */
+            /**
+             * @description Whether the store's access points can currently hear this label, derived from Pi telemetry. `never_heard` means no access point has ever listed it, usually a tag id that matches no real hardware. `out_of_range` means heard once but not within the last hour. `weak` means heard recently at -70 dBm or worse.
+             * @enum {string}
+             */
+            signal: "ok" | "weak" | "out_of_range" | "never_heard";
+            /** @description Last reported signal strength in dBm. Null if never heard. */
+            rf_power?: number | null;
+            /** @description Battery reading in volts, from the raw tenths-of-a-volt byte the hardware reports. Not a percentage; no discharge curve is assumed. */
             battery_volts?: number | null;
-            /** @description Low-battery flag as computed by the gateway. */
-            low_battery?: boolean | null;
+        };
+        LabelUpdateSummary: {
+            /** Format: uuid */
+            update_id: string;
+            /** @enum {string} */
+            action: "Update" | "Unassign" | "Locate";
+            /** @enum {string} */
+            status: "Pending" | "Dispatched" | "Succeeded" | "Failed" | "Superseded";
+            failure_code?: string | null;
+            retryable?: boolean | null;
+            /** Format: date-time */
+            status_at?: string | null;
+        };
+        StoreLabel: {
+            tag_id: components["schemas"]["TagId"];
+            /** Format: date-time */
+            last_seen_at?: string | null;
+            low_battery: boolean;
+            /** @description Raw vendor byte, not a percentage. */
+            battery?: number | null;
+            assigned: boolean;
+            variation_id?: string | null;
+        };
+        StoreLabelList: {
+            labels: components["schemas"]["StoreLabel"][];
+        };
+        StoreGateways: {
+            gateways: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                key_prefix: string;
+                /** Format: date-time */
+                last_seen_at?: string | null;
+                revoked: boolean;
+            }[];
+            access_points: {
+                ap_id: string;
+                connected: boolean;
+                stale: boolean;
+                /** Format: date-time */
+                last_heartbeat_at?: string | null;
+                /** Format: date-time */
+                reported_at: string;
+            }[];
         };
         TagList: {
             tags: components["schemas"]["Tag"][];
@@ -241,30 +534,47 @@ export interface components {
             price?: number | null;
             /** @enum {string} */
             pricing_type: "FIXED_PRICING" | "VARIABLE_PRICING";
+            /** @description Square's UPC/GTIN field. */
+            gtin?: string | null;
+            currency?: string | null;
+        };
+        ClassifyResult: {
+            /** @enum {string} */
+            kind: "tag" | "product";
+            /** @description The 12-hex tag ID for tags; the trimmed code for products. */
+            normalized: string;
+        };
+        VariationWithStorePrice: {
+            id: string;
+            item_id: string;
+            name: string;
+            variation_name: string;
+            sku?: string | null;
+            gtin?: string | null;
+            /** @description Price at this store in the smallest currency unit. Null when VARIABLE_PRICING. */
+            price?: number | null;
+            /** @enum {string} */
+            pricing_type: "FIXED_PRICING" | "VARIABLE_PRICING";
+            currency?: string | null;
+        };
+        LookupResult: {
+            matches: components["schemas"]["VariationWithStorePrice"][];
         };
         VariationList: {
             variations: components["schemas"]["Variation"][];
         };
         AssignBody: {
-            /** @description Store this tag belongs to. Immutable once the tag is created. */
-            store_id: string;
             /** @description Variation to assign. Null to unassign. */
             variation_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Store the tag was scanned in. New tags are registered there; an existing tag moves there. Null keeps the current store (new tags go to the user's first store).
+             */
+            store_id?: string | null;
         };
         LocateBody: {
-            /** @description Flash duration. Omit for the gateway's default (30s). The gateway caps this at its own configured maximum (300s). */
-            seconds?: number;
-        };
-        LocateAccepted: {
-            /** @description Idempotency key of the queued Locate command */
-            update_id: string;
-            tag_id: components["schemas"]["TagId"];
-            seconds?: number | null;
-        };
-        ConfirmBody: {
-            /** @description Hash of what was actually rendered, for drift detection */
-            content_hash: string;
-            battery_pct?: number | null;
+            /** @default 30 */
+            seconds: number;
         };
         Health: {
             /** @enum {string} */
@@ -273,8 +583,336 @@ export interface components {
         Error: {
             detail: string;
         };
+        Store: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        SquareLocation: {
+            id: string;
+            name: string;
+            /** Format: uuid */
+            store_id?: string | null;
+        };
+        SquareLocationList: {
+            locations: components["schemas"]["SquareLocation"][];
+        };
+        StoreSelection: {
+            location_ids: string[];
+        };
+        StoreList: {
+            stores: components["schemas"]["Store"][];
+        };
+        Me: {
+            /** Format: uuid */
+            user_id: string;
+            email: string;
+            /** @enum {string} */
+            role: "owner" | "staff";
+            business: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            stores: components["schemas"]["Store"][];
+        };
+        StaffUser: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            /** @enum {string} */
+            role: "owner" | "staff";
+            disabled: boolean;
+            /** @description Staff only. True means every store in the business, including stores added later, and store_ids is then empty. Always false for owners, who use every store regardless. */
+            all_stores: boolean;
+            /** @description The stores a staff member may use when all_stores is false. Empty with all_stores false means no store access. */
+            store_ids: string[];
+        };
+        StaffList: {
+            users: components["schemas"]["StaffUser"][];
+        };
+        StaffInvite: {
+            email: string;
+            /** @description Every store, including stores added later. Omitted means false. Can't be combined with a non-empty store_ids. */
+            all_stores?: boolean;
+            /** @description The stores the new staff member may use. Omitted or empty with all_stores false means no store access until an owner grants one. */
+            store_ids?: string[];
+        };
+        /** @description Sending all_stores or store_ids replaces the staff member's store access. A field left out counts as false or empty, so {"all_stores": false} alone leaves them with no store access. all_stores true with a non-empty store_ids is a 400. */
+        StaffUpdate: {
+            all_stores?: boolean;
+            /** @description Replaces allowed stores. Empty with all_stores false means no store access. */
+            store_ids?: string[];
+            disabled?: boolean;
+        };
+        SquareConnection: {
+            /** @enum {string} */
+            status: "not_connected" | "active" | "needs_reconnect" | "revoked";
+            merchant_id?: string | null;
+        };
+        AuthorizeUrl: {
+            authorize_url: string;
+        };
+        Money: {
+            /**
+             * @description Nonnegative decimal amount encoded as a string, not a JSON number.
+             * @example 219.99
+             */
+            amount: string;
+            /**
+             * @description ISO 4217 currency code.
+             * @example USD
+             */
+            currency: string;
+        };
+        /** @description Semantic data aligned with the Square catalog model; the Pi owns the layout. */
+        Display: {
+            /** @description Square item name; must contain non-whitespace text. */
+            itemName: string;
+            /** @description Square variation name as-is. Not rendered when empty, Regular (case-insensitive), or equal to itemName. */
+            variationName?: string | null;
+            price: components["schemas"]["Money"];
+            sku?: string | null;
+            /** @description Only if the integration already has it; stored */
+            category?: string | null;
+            /** @description Only if the integration already has it; stored */
+            description?: string | null;
+        };
+        /**
+         * @description Central sends semantic display data; the Pi renders images and barcodes. Update and Unassign share
+         *     a strictly increasing per-label version ladder. A version at or below the highest successfully applied
+         *     version is Superseded. Newer queued display work can supersede older queued work; claimed/in-flight
+         *     work completes before another command is sent to that label.
+         *     Locate ignores version and does not change or participate in the display version ladder. It waits
+         *     behind in-flight work for the same label; a newer Locate replaces an older queued Locate.
+         *     Schemas describe canonical commands central should emit. The Pi tolerates missing createdAt
+         *     (uses receipt time) and productId, and treats a blank/null action as Update. Invalid commands with
+         *     a parseable updateId are reported as Failed/InvalidCommand when they can be deserialized;
+         *     a missing or unparseable updateId cannot be correlated and is skipped.
+         * @example {
+         *       "updateId": "7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "version": 42,
+         *       "productId": "SQ-VARIATION-8H2K",
+         *       "createdAt": "2026-09-05T14:03:00Z",
+         *       "display": {
+         *         "itemName": "2024 Topps Chrome Baseball",
+         *         "variationName": "Hobby Box",
+         *         "price": {
+         *           "amount": "219.99",
+         *           "currency": "USD"
+         *         },
+         *         "sku": "TC24-HBY"
+         *       }
+         *     }
+         * @example {
+         *       "updateId": "0d7f4c3e-5f1a-4c8b-9b7e-2a6d8e1f3c44",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "version": 44,
+         *       "createdAt": "2026-09-06T09:00:00Z",
+         *       "action": "Unassign"
+         *     }
+         * @example {
+         *       "updateId": "3c1f6a2e-7d0b-4e9a-8b1c-5f2d9e7a1b44",
+         *       "storeId": "STORE-001",
+         *       "tagId": "840001282A7E",
+         *       "action": "Locate",
+         *       "seconds": 30,
+         *       "createdAt": "2026-09-06T14:03:00Z"
+         *     }
+         */
+        LabelUpdateCommand: {
+            /**
+             * Format: uuid
+             * @description Idempotency key; never reused for different content.
+             */
+            updateId: string;
+            /** @description Must equal the Pi's configured store; anything else is rejected as `InvalidCommand`. */
+            storeId: string;
+            /** @description The physical label. */
+            tagId: string;
+            /**
+             * @description `Update` paints the product template; `Unassign` paints the barcode screen; `Locate` flashes the LED.
+             * @default Update
+             * @enum {string}
+             */
+            action: "Update" | "Unassign" | "Locate";
+            /**
+             * Format: int64
+             * @description Strictly increasing per tagId; required for Update and Unassign, ignored for Locate.
+             */
+            version?: number | null;
+            /** @description Square catalog object id of the variation */
+            productId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Required for Update; omitted or null for Unassign and Locate (ignored by the Pi). */
+            display?: components["schemas"]["Display"] | null;
+            /** @description Locate only. Flash duration in seconds; Pi default 30, capped at its configured maximum (default 300). Does not change the displayed image. */
+            seconds?: number | null;
+        } & (unknown & unknown);
+        Diagnostics: {
+            /** @description dBm; -256 means the label did not answer. */
+            rfPower: number;
+            /** @description Raw vendor battery byte; unit is unconfirmed (likely tenths of a volt). Not a percentage; 0 means no data. */
+            battery: number;
+            temperature: number;
+            statusByte: number;
+            lowBattery: boolean;
+        };
+        /**
+         * @example {
+         *       "updateId": "7f0d0d5c-0b7e-4d2a-9c1e-1f3b6a4d8e21",
+         *       "tagId": "840001282A7E",
+         *       "version": 42,
+         *       "action": "Update",
+         *       "status": "Succeeded",
+         *       "statusAt": "2026-09-05T14:03:41Z",
+         *       "attempt": 2,
+         *       "apId": "0CNT",
+         *       "failureCode": null,
+         *       "failureMessage": null,
+         *       "retryable": null,
+         *       "diagnostics": {
+         *         "rfPower": -58,
+         *         "battery": 30,
+         *         "temperature": 22,
+         *         "statusByte": 129,
+         *         "lowBattery": false
+         *       }
+         *     }
+         */
+        LabelUpdateStatusReport: {
+            /** Format: uuid */
+            updateId: string;
+            tagId: string;
+            /**
+             * Format: int64
+             * @description null for Locate.
+             */
+            version?: number | null;
+            /** @enum {string} */
+            action: "Update" | "Unassign" | "Locate";
+            /**
+             * @description Only Accepted and terminal states cross the wire. Accepted means durably stored, not delivered;
+             *     Queued, Dispatching and SentToAp are local states mapped to Accepted on duplicate reports.
+             *     Succeeded confirms the display update for Update/Unassign, or the LED command for Locate.
+             *     Failed and Superseded are terminal; Superseded is not an error. Immediate terminal outcomes
+             *     may arrive without an earlier Accepted report.
+             * @enum {string}
+             */
+            status: "Accepted" | "Succeeded" | "Failed" | "Superseded";
+            /** Format: date-time */
+            statusAt: string;
+            /** @description Attempt counter; may be zero before hardware execution. */
+            attempt: number;
+            apId?: string | null;
+            /** @enum {string|null} */
+            failureCode?: "LabelNoResponse" | "ApUnavailable" | "ApTimeout" | "ApQueueFull" | "LabelRejectedKey" | "LabelHardwareError" | "RenderError" | "InvalidCommand" | "InternalError" | null;
+            /** @description Failure details or supersession reason; null otherwise. */
+            failureMessage?: string | null;
+            /**
+             * @description Null for non-failures. True for LabelNoResponse, ApUnavailable, ApTimeout and ApQueueFull;
+             *     false for LabelRejectedKey, LabelHardwareError, RenderError, InvalidCommand and InternalError.
+             *     Central owns business retries: issue a new updateId and, for display actions, a newer version.
+             *     Re-pending the same terminal ID only retrieves its stored outcome.
+             */
+            retryable?: boolean | null;
+            /**
+             * Format: int64
+             * @description Superseded at intake only: the highest version this Pi had already applied or was holding for
+             *     the label when it rejected this one as not newer. Null otherwise. When it is not lower than
+             *     central's latest version, central's ladder is behind the Pi's; central resends the current
+             *     state once, above knownVersion. Additive; older Pis omit it.
+             */
+            knownVersion?: number | null;
+            diagnostics?: components["schemas"]["Diagnostics"] | null;
+        };
+        LabelTelemetry: {
+            tagId: string;
+            /** Format: date-time */
+            firstSeenAt: string;
+            /** Format: date-time */
+            lastSeenAt?: string | null;
+            lastSeenApId?: string | null;
+            /** @description dBm of the last sighting. */
+            rfPower?: number | null;
+            /** @description Raw vendor byte, not a percentage; unit unconfirmed (likely tenths of a volt). A fresh cell has been observed at about 31. */
+            battery?: number | null;
+            /** @description The Pi's judgement with its configured threshold (25). */
+            lowBattery: boolean;
+            temperature?: number | null;
+            statusByte?: number | null;
+            firmwareVersion?: number | null;
+            type?: number | null;
+            size?: number | null;
+            color?: number | null;
+            factory?: number | null;
+            lastSuccessApId?: string | null;
+            /** Format: date-time */
+            lastSuccessAt?: string | null;
+            /** Format: date-time */
+            lastResultAt?: string | null;
+            lastResultSuccess?: boolean | null;
+        };
+        AccessPointTelemetry: {
+            apId: string;
+            connected: boolean;
+            /** @description Connected but no heartbeat within the configured threshold (default three intervals); treat prolonged staleness as offline. */
+            stale: boolean;
+            /** Format: date-time */
+            connectedAt?: string | null;
+            /** Format: date-time */
+            disconnectedAt?: string | null;
+            /** Format: date-time */
+            lastHeartbeatAt?: string | null;
+            heartbeatIntervalSeconds: number;
+            apVersion?: string | null;
+            ip?: string | null;
+            waitCount: number;
+            sendCount: number;
+        };
+        TelemetryReport: {
+            storeId: string;
+            /** Format: date-time */
+            reportedAt: string;
+            /** @description true when `labels` holds every label the Pi knows. */
+            full: boolean;
+            labels: components["schemas"]["LabelTelemetry"][];
+            accessPoints: components["schemas"]["AccessPointTelemetry"][];
+        };
     };
-    responses: never;
+    responses: {
+        /** @description Not signed in, or the token is invalid or expired. */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Signed in, but this user may not do this. */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Square returned an error other than an invalid token. */
+        SquareUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
     headers: never;
@@ -304,7 +942,12 @@ export interface operations {
     };
     listVariations: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive search on item name, variation name or SKU (max 50 results). */
+                q?: string;
+                /** @description Only variations available at this store, priced for it. */
+                store_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -320,52 +963,10 @@ export interface operations {
                     "application/json": components["schemas"]["VariationList"];
                 };
             };
-        };
-    };
-    listStores: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Stores (api_key omitted — only returned once, on creation) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Store"][];
-                };
-            };
-        };
-    };
-    createStore: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StoreCreateBody"];
-            };
-        };
-        responses: {
-            /** @description Store created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoreWithKey"];
-                };
-            };
-            /** @description id or square_location_id already in use */
-            400: {
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -375,10 +976,11 @@ export interface operations {
             };
         };
     };
-    listTagsAdmin: {
+    classifyScan: {
         parameters: {
-            query?: {
-                store_id?: string;
+            query: {
+                code: string;
+                store_id: string;
             };
             header?: never;
             path?: never;
@@ -386,13 +988,76 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List of tags, optionally filtered by store */
+            /** @description Classification */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagList"];
+                    "application/json": components["schemas"]["ClassifyResult"];
+                };
+            };
+            /** @description Empty scan */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    lookupProduct: {
+        parameters: {
+            query: {
+                code: string;
+                store_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zero or more matches, priced for the store */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookupResult"];
+                };
+            };
+            /** @description Empty code */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Store not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -406,7 +1071,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List of tags belonging to the authenticated store */
+            /** @description List of tags */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -415,15 +1080,8 @@ export interface operations {
                     "application/json": components["schemas"]["TagList"];
                 };
             };
-            /** @description Missing or invalid X-Store-Key */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getTag: {
@@ -446,26 +1104,19 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
-            /** @description tag_id is not 12 hex characters */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid X-Store-Key */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Tag not found (or belongs to a different store) */
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Tag not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tag ID is not 12 hexadecimal characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -499,8 +1150,10 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
-            /** @description tag_id is not 12 hex characters, or the tag already belongs to a different store */
-            400: {
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description variation_id not found in catalog, or store_id not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -508,8 +1161,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description store_id or variation_id not found */
-            404: {
+            /** @description The tag can't be used by this business, or the variation has no price to show at this store (VARIABLE_PRICING). The detail says which; it never reveals who owns a tag. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tag ID is not 12 hexadecimal characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -534,17 +1196,19 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Locate queued for the gateway's next poll */
-            202: {
+            /** @description Locate command queued */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LocateAccepted"];
+                    "application/json": components["schemas"]["LabelUpdateSummary"];
                 };
             };
-            /** @description tag_id is not 12 hex characters, or seconds is out of range */
-            400: {
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Tag not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -552,7 +1216,40 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Tag not found */
+            /** @description The tag ID is not 12 hexadecimal characters, or seconds is out of range */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getLabelUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                update_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Command status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelUpdateSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -563,29 +1260,139 @@ export interface operations {
             };
         };
     };
-    confirmTag: {
+    listStoreLabels: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                tag_id: components["schemas"]["TagId"];
+                store_id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tag inventory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreLabelList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStoreGateways: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gateways and access points */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreGateways"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Not found (including objects of another business) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listStores: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stores */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    selectStores: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfirmBody"];
+                "application/json": components["schemas"]["StoreSelection"];
             };
         };
         responses: {
-            /** @description Confirmation recorded */
-            204: {
+            /** @description All stores after the change */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StoreList"];
+                };
             };
-            /** @description tag_id is not 12 hex characters */
+            /** @description Empty selection or a location that isn't an active Square location */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -594,8 +1401,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Missing or invalid X-Store-Key */
-            401: {
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Square is not connected, or Square rejected the token (reconnect needed) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -603,7 +1412,120 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Tag not found (or belongs to a different store) */
+            502: components["responses"]["SquareUnavailable"];
+        };
+    };
+    listStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Users */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    inviteStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffInvite"];
+            };
+        };
+        responses: {
+            /** @description Invited; Cognito emails them a temporary password */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffUser"];
+                };
+            };
+            /** @description A store id does not belong to this business, or all_stores was combined with store_ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description This email can't be invited */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invitation could not be sent */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffUser"];
+                };
+            };
+            /** @description A store id does not belong to this business, or all_stores was combined with store_ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description No such user in this business */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -611,6 +1533,270 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
+            };
+            /** @description The identity provider call failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSquareConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquareConnection"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    startSquareOAuth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Send the browser to authorize_url */
+            200: {
+                headers: {
+                    /** @description esl_square_oauth_state=<state>; HttpOnly; SameSite=Lax; Path=/v1/square/oauth/callback; Max-Age=600 (plus Secure over https) */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizeUrl"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Square OAuth is not configured on the server */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    squareOAuthCallback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                /** @description The state set by startSquareOAuth in this browser. */
+                esl_square_oauth_state?: string;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the dashboard. result is one of connected, error, merchant_in_use, different_merchant. */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listSquareLocations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Locations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquareLocationList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Square is not connected, or Square rejected the token (reconnect needed) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            502: components["responses"]["SquareUnavailable"];
+        };
+    };
+    fetchPending: {
+        parameters: {
+            query: {
+                storeId: string;
+                limit?: number;
+                /**
+                 * @description Long polling. Hold the request until at least one Pending command exists for the store, then answer at
+                 *     once; answer an empty page at the deadline. The Pi sends 25. A server that ignores this parameter still
+                 *     works: the Pi falls back to polling every 5 s.
+                 */
+                wait?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of commands. The Pi drains further pages when hasMore is true, allowing Accepted reports to settle between pages (default 1 s). Return an empty updates array and hasMore false when no work exists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updates: components["schemas"]["LabelUpdateCommand"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reportStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    storeId: string;
+                    reports: components["schemas"]["LabelUpdateStatusReport"][];
+                };
+            };
+        };
+        responses: {
+            /** @description All reports acknowledged, including valid duplicates and stale entries. acceptedCount must equal the submitted batch size. Non-2xx, malformed or mismatched acknowledgements retain the whole batch for retry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        acceptedCount: number;
+                    };
+                };
+            };
+            /** @description Malformed or foreign command report; the entire batch is rejected without partial application. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reportTelemetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryReport"];
+            };
+        };
+        responses: {
+            /** @description Accepted. Unlike status reports, telemetry accepts any successful 2xx response, including an empty body; acceptedCount is informational. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        acceptedCount?: number;
+                    };
+                };
+            };
+            /** @description Telemetry accepted without a response body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, unknown or revoked X-Api-Key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key does not match the store. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

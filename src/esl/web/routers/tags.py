@@ -1,37 +1,32 @@
-import re
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response, Security
-from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from esl.catalog.models import CatalogVariation, Store
-from esl.catalog.pricing import resolve_price
-from esl.db import get_session
-from esl.tags.commands import enqueue_for_tag, enqueue_locate
-from esl.tags.hashing import hash_projection
-from esl.tags.models import LabelTelemetry, Tag
-from esl.tags.signal import battery_volts, classify
-from esl.tags.projection import UNASSIGNED, build_projection
-from esl.web.auth import get_current_user
+from esl.auth.current_user import CurrentUser
+from esl.businesses.models import Store
+from esl.catalog.models import CatalogVariation
+from esl.gateway.commands import enqueue_locate, rehome_pending
+from esl.scan import normalize_tag_id as scan_normalize_tag_id
+from esl.tags.desired import apply_desired_state, desired_projection, projections_for
+from esl.tags.models import Tag
+from esl.tags.projection import Projection
+from esl.tags.signal import SIGNAL_NEVER_HEARD, battery_volts, classify
+from esl.tags.status import TagExtras, load_tag_extras
+from esl.web.deps import get_business_session, get_current_user, get_request_business_id
+from esl.web.routers.label_updates import LabelUpdateSummary, summarize
+from esl.web.stores import get_store_for_user
 
 router = APIRouter()
-
-# Security scheme, not a bare Header, so /docs can send it (see central.py).
-_store_key = APIKeyHeader(
-    name="X-Store-Key",
-    auto_error=False,
-    scheme_name="StoreKey",
-    description="Per-store key for the legacy /v1 gateway routes.",
-)
 
 
 class TagResponse(BaseModel):
     id: str
-    store_id: str
     variation_id: str | None = None
     name: str | None = None
     variation_name: str | None = None
@@ -39,14 +34,15 @@ class TagResponse(BaseModel):
     price: int | None = None
     pricing_type: str | None = None
     content_hash: str | None = None
-    last_pushed_at: datetime | None = None
     last_confirmed_at: datetime | None = None
-    battery_pct: int | None = None
-    signal: str = "never_heard"
-    rf_power: int | None = None
-    last_seen_at: datetime | None = None
-    battery_volts: float | None = None
+    version: int = 0
+    store_id: uuid.UUID | None = None
+    latest_update: LabelUpdateSummary | None = None
     low_battery: bool | None = None
+    last_seen_at: datetime | None = None
+    signal: str = SIGNAL_NEVER_HEARD
+    rf_power: int | None = None
+    battery_volts: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -56,296 +52,186 @@ class TagListResponse(BaseModel):
 
 
 class AssignBody(BaseModel):
-    store_id: str
     variation_id: str | None = None
+    store_id: uuid.UUID | None = None
 
 
 class LocateBody(BaseModel):
-    seconds: int | None = None
-
-    @field_validator("seconds")
-    @classmethod
-    def seconds_in_range(cls, v: int | None) -> int | None:
-        # The gateway's own cap is 300s, but its protocol field allows the
-        # full 1..65535 range — mirror the protocol here and let the
-        # gateway apply its configured maximum.
-        if v is not None and not (1 <= v <= 65535):
-            raise ValueError("seconds must be between 1 and 65535")
-        return v
+    seconds: int = Field(default=30, ge=1, le=300)
 
 
-class LocateAccepted(BaseModel):
-    update_id: str
-    tag_id: str
-    seconds: int | None = None
-
-
-class ConfirmBody(BaseModel):
-    content_hash: str
-    battery_pct: int | None = None
-
-    @field_validator("battery_pct")
-    @classmethod
-    def battery_in_range(cls, v: int | None) -> int | None:
-        if v is not None and not (0 <= v <= 100):
-            raise ValueError("battery_pct must be 0–100")
-        return v
-
-
-_TAG_ID_RE = re.compile(r"^[0-9A-F]{12}$")
-
-
-def _normalize_tag_id(tag_id: str) -> str:
-    """Uppercase and validate at the API boundary.
-
-    12 hex characters is the real ESL hardware id length (confirmed
-    against api/westgate-store-service.yaml). Rejecting here keeps ids
-    the gateway's hardware would refuse as InvalidTagId from ever
-    reaching the database.
-    """
-    normalized = tag_id.upper()
-    if not _TAG_ID_RE.match(normalized):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Tag id must be 12 hexadecimal characters, got {tag_id!r}",
-        )
+def normalize_tag_id(tag_id: str) -> str:
+    """Tag IDs are 12 uppercase hex characters (the Pi's and the hardware's format)."""
+    normalized = scan_normalize_tag_id(tag_id)
+    if normalized is None:
+        raise HTTPException(status_code=422, detail="Tag ID must be 12 hexadecimal characters")
     return normalized
 
 
-async def get_current_store(
-    session: AsyncSession = Depends(get_session),
-    x_store_key: str | None = Security(_store_key),
-) -> Store:
-    if not x_store_key:
-        raise HTTPException(status_code=401, detail="Missing X-Store-Key header")
-    store = (
-        await session.execute(select(Store).where(Store.api_key == x_store_key))
-    ).scalar_one_or_none()
-    if store is None:
-        raise HTTPException(status_code=401, detail="Invalid X-Store-Key")
-    return store
-
-
-def _tag_to_response(
-    tag: Tag, telemetry: LabelTelemetry | None = None
-) -> TagResponse:
-    if tag.variation is not None:
-        price = resolve_price(tag.variation, tag.store.square_location_id)
-        proj = build_projection(tag.variation.item, tag.variation, price)
-    else:
-        proj = UNASSIGNED
-
+def _tag_to_response(tag: Tag, proj: Projection) -> TagResponse:
     return TagResponse(
         id=tag.id,
-        store_id=tag.store_id,
         variation_id=tag.variation_id,
         content_hash=tag.content_hash,
-        last_pushed_at=tag.last_pushed_at,
         last_confirmed_at=tag.last_confirmed_at,
-        battery_pct=tag.battery_pct,
+        version=tag.version,
+        store_id=tag.store_id,
         name=proj["name"],
         variation_name=proj["variation_name"],
         sku=proj["sku"],
         price=proj["price"],
         pricing_type=proj["pricing_type"],
-        signal=classify(telemetry),
-        rf_power=telemetry.rf_power if telemetry else None,
-        last_seen_at=telemetry.last_seen_at if telemetry else None,
-        battery_volts=battery_volts(telemetry.battery) if telemetry else None,
-        low_battery=telemetry.low_battery if telemetry else None,
     )
 
 
-async def _telemetry_for(session: AsyncSession, tags: list[Tag]) -> dict:
-    """Latest telemetry for a set of tags, keyed by (store_id, tag_id).
-
-    Fetched in one query rather than per tag — the tags table is the
-    dashboard's busiest view and polls every 5 seconds.
-    """
-    if not tags:
-        return {}
-    keys = {(t.store_id, t.id) for t in tags}
-    rows = (
-        await session.execute(
-            select(LabelTelemetry).where(
-                LabelTelemetry.tag_id.in_({t.id for t in tags})
-            )
-        )
-    ).scalars().all()
-    return {(r.store_id, r.tag_id): r for r in rows if (r.store_id, r.tag_id) in keys}
+def _with_extras(response: TagResponse, extras: TagExtras | None) -> TagResponse:
+    if extras is None:
+        return response
+    telemetry = extras.telemetry
+    return response.model_copy(update={
+        "latest_update": summarize(extras.latest_update) if extras.latest_update else None,
+        "low_battery": telemetry.low_battery if telemetry else None,
+        "last_seen_at": telemetry.last_seen_at if telemetry else None,
+        "signal": classify(telemetry),
+        "rf_power": telemetry.rf_power if telemetry else None,
+        "battery_volts": battery_volts(telemetry.battery) if telemetry else None,
+    })
 
 
-_TAG_OPTIONS = [
-    selectinload(Tag.variation).selectinload(CatalogVariation.item),
-    selectinload(Tag.variation).selectinload(CatalogVariation.location_prices),
-    selectinload(Tag.store),
-]
+def _ensure_store_allowed(user: CurrentUser, store_id: uuid.UUID) -> None:
+    if not user.can_use_store(store_id):
+        raise HTTPException(status_code=403, detail="You don't have access to this store")
+
+
+def _ensure_has_a_store(user: CurrentUser) -> None:
+    if not user.has_store_access:
+        raise HTTPException(status_code=403, detail="You don't have access to any store")
 
 
 @router.get("/tags", response_model=TagListResponse)
 async def list_tags(
-    session: AsyncSession = Depends(get_session),
-    store: Store = Depends(get_current_store),
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
 ):
-    tags = (
-        await session.execute(
-            select(Tag).where(Tag.store_id == store.id).options(*_TAG_OPTIONS)
-        )
-    ).scalars().all()
-    tele = await _telemetry_for(session, list(tags))
-    return TagListResponse(
-        tags=[_tag_to_response(t, tele.get((t.store_id, t.id))) for t in tags]
-    )
-
-
-@router.get("/admin/tags", response_model=TagListResponse)
-async def list_tags_admin(
-    store_id: str | None = None,
-    session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
-):
-    """Cross-store listing for the admin dashboard, gated by Auth0 login.
-
-    Unlike GET /tags (the gateway's per-store poll, gated by X-Store-Key),
-    this has no store-key concept — the dashboard isn't a gateway and has
-    no key to send; it authenticates the human instead. Optional store_id
-    narrows to one store.
-    """
-    query = select(Tag).options(*_TAG_OPTIONS)
-    if store_id is not None:
-        query = query.where(Tag.store_id == store_id)
+    if not user.has_store_access:
+        return TagListResponse(tags=[])
+    query = select(Tag)
+    if user.store_ids is not None:
+        query = query.where(Tag.store_id.in_(user.store_ids))
     tags = (await session.execute(query)).scalars().all()
-    tele = await _telemetry_for(session, list(tags))
+    projections = await projections_for(session, tags)
+    extras = await load_tag_extras(session, tags)
     return TagListResponse(
-        tags=[_tag_to_response(t, tele.get((t.store_id, t.id))) for t in tags]
+        tags=[_with_extras(_tag_to_response(t, projections[t.id]), extras.get(t.id)) for t in tags]
     )
 
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: str,
-    session: AsyncSession = Depends(get_session),
-    store: Store = Depends(get_current_store),
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
 ):
-    tag_id = _normalize_tag_id(tag_id)
-    tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
-    if tag is None or tag.store_id != store.id:
+    tag_id = normalize_tag_id(tag_id)
+    tag = await session.get(Tag, tag_id)
+    if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
-    telemetry = await session.get(LabelTelemetry, (tag.store_id, tag.id))
-    return _tag_to_response(tag, telemetry)
+    _ensure_store_allowed(user, tag.store_id)
+    projections = await projections_for(session, [tag])
+    extras = (await load_tag_extras(session, [tag])).get(tag.id)
+    return _with_extras(_tag_to_response(tag, projections[tag.id]), extras)
+
+
+async def _default_store_id(session: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
+    # New tags go to the first store this user may use, until pairing picks a store.
+    query = select(Store.id).order_by(Store.created_at, Store.id).limit(1)
+    if user.store_ids is not None:
+        query = query.where(Store.id.in_(user.store_ids))
+    return (await session.execute(query)).scalar_one_or_none()
 
 
 @router.put("/tags/{tag_id}", response_model=TagResponse)
 async def assign_tag(
     tag_id: str,
     body: AssignBody,
-    session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
+    business_id: uuid.UUID = Depends(get_request_business_id),
+    session: AsyncSession = Depends(get_business_session),
 ):
-    tag_id = _normalize_tag_id(tag_id)
-
-    store = await session.get(Store, body.store_id)
-    if store is None:
-        raise HTTPException(status_code=404, detail=f"Store {body.store_id} not found")
+    tag_id = normalize_tag_id(tag_id)
+    _ensure_has_a_store(user)
 
     variation = None
     if body.variation_id is not None:
         variation = await session.get(
-            CatalogVariation, body.variation_id,
-            options=[
-                selectinload(CatalogVariation.item),
-                selectinload(CatalogVariation.location_prices),
-            ],
+            CatalogVariation,
+            {"business_id": business_id, "id": body.variation_id},
+            options=[selectinload(CatalogVariation.item)],
         )
         if variation is None:
             raise HTTPException(status_code=404, detail=f"Variation {body.variation_id} not found")
 
-    tag = await session.get(Tag, tag_id, options=_TAG_OPTIONS)
+    # The store the tag was scanned in: 404 if invisible (another business), 403 if not allowed.
+    target_store_id = None
+    if body.store_id is not None:
+        target_store_id = (await get_store_for_user(session, user, body.store_id)).id
+
+    store_moved = False
+    tag = await session.get(Tag, tag_id)
     if tag is None:
-        tag = Tag(id=tag_id, store_id=body.store_id)
+        if target_store_id is None:
+            target_store_id = await _default_store_id(session, user)
+            if target_store_id is None:
+                raise HTTPException(status_code=409, detail="Business has no stores")
+        tag = Tag(id=tag_id, business_id=business_id, store_id=target_store_id)
         session.add(tag)
-    elif tag.store_id != body.store_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Tag {tag_id} belongs to store {tag.store_id!r}, not {body.store_id!r}",
-        )
+    else:
+        _ensure_store_allowed(user, tag.store_id)
+        if target_store_id is not None and target_store_id != tag.store_id:
+            tag.store_id = target_store_id  # scanned in this store: it lives here now
+            store_moved = True
 
     tag.variation_id = body.variation_id
 
-    if variation is not None:
-        price = resolve_price(variation, store.square_location_id)
-        proj = build_projection(variation.item, variation, price)
-        tag.content_hash = hash_projection(proj)
-    else:
-        # Null, not a hash of the empty projection: the contract defines
-        # content_hash == null as "unassigned", and that is the only signal
-        # the gateway has to show its unassigned screen instead of trying to
-        # render a product with no name and no price.
-        proj = None
-        tag.content_hash = None
+    try:
+        # apply_desired_state queries (autoflush), so a foreign tag ID can
+        # surface here as well as at commit. The variable-price check queries
+        # too, so it must sit inside this guard to keep the 409 for foreign tags.
+        if body.variation_id is not None:
+            # The contract needs a price; a VARIABLE_PRICING item (at this store) can't be shown.
+            if (await desired_projection(session, tag))["price"] is None:
+                await session.rollback()
+                raise HTTPException(status_code=409, detail="Variable-priced items can't be shown on a label")
+        if store_moved:
+            # Unchanged content enqueues nothing below, so a queued command must follow the tag.
+            await rehome_pending(session, tag)
+        # A moved tag whose last display never reached it (e.g. the old store's Pi rejected
+        # it) gets that state again at the new store; confirmed content is not resent.
+        await apply_desired_state(session, tag, resend_unconfirmed=store_moved)
+        await session.commit()
+    except IntegrityError:
+        # RLS hid an existing tag with this ID in another business. Don't say so.
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="This tag can't be used")
 
-    # Queue the work for the gateway's own contract. The tag must be
-    # flushed first: label_commands.tag_id is a foreign key, and a brand
-    # new tag has not hit the database yet.
-    await session.flush()
-    await enqueue_for_tag(
-        session, tag, proj, currency=(variation.currency or "USD") if variation else "USD"
-    )
-
-    await session.commit()
-
-    # Reload with eager options so _tag_to_response can access variation/store.
-    # populate_existing=True is required here: the tag object is already in
-    # the session's identity map (client-assigned PK, added above), so a
-    # plain session.get() would return it as-is without applying the eager
-    # load options, and _tag_to_response would hit lazy="raise".
-    tag = await session.get(
-        Tag, tag_id, options=_TAG_OPTIONS, populate_existing=True
-    )
-    return _tag_to_response(tag)
+    tag = await session.get(Tag, tag_id, populate_existing=True)
+    projections = await projections_for(session, [tag])
+    extras = (await load_tag_extras(session, [tag])).get(tag.id)
+    return _with_extras(_tag_to_response(tag, projections[tag.id]), extras)
 
 
-@router.post("/tags/{tag_id}/confirm", status_code=204)
-async def confirm_tag(
-    tag_id: str,
-    body: ConfirmBody,
-    session: AsyncSession = Depends(get_session),
-    store: Store = Depends(get_current_store),
-):
-    tag_id = _normalize_tag_id(tag_id)
-    tag = await session.get(Tag, tag_id)
-    if tag is None or tag.store_id != store.id:
-        raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
-
-    tag.last_confirmed_at = datetime.now(timezone.utc)
-    if body.battery_pct is not None:
-        tag.battery_pct = body.battery_pct
-
-    await session.commit()
-    return Response(status_code=204)
-
-
-@router.post("/tags/{tag_id}/locate", status_code=202, response_model=LocateAccepted)
+@router.post("/tags/{tag_id}/locate", response_model=LabelUpdateSummary)
 async def locate_tag(
     tag_id: str,
     body: LocateBody | None = None,
-    session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_business_session),
 ):
-    """Flash a tag's LED from the dashboard.
-
-    Queues a Locate on the gateway's command queue rather than calling the
-    hardware: the store service is LAN-only and unreachable from here, so
-    the flash happens on the gateway's next poll.
-    """
-    tag_id = _normalize_tag_id(tag_id)
+    tag_id = normalize_tag_id(tag_id)
     tag = await session.get(Tag, tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
-
-    seconds = body.seconds if body else None
-    command = await enqueue_locate(session, tag, seconds)
+    _ensure_store_allowed(user, tag.store_id)
+    update = await enqueue_locate(session, tag, seconds=(body or LocateBody()).seconds)
     await session.commit()
-    return LocateAccepted(
-        update_id=command.update_id, tag_id=tag_id, seconds=seconds
-    )
+    return summarize(update)

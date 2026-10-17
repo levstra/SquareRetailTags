@@ -49,7 +49,7 @@ export function relativeTime(iso: string): string {
 export type Tone = "ok" | "warn" | "bad" | "idle";
 
 export type TagStatus = {
-  key: "never_heard" | "out_of_range" | "low_battery" | "weak" | "ok";
+  key: "never_heard" | "out_of_range" | "update_failed" | "low_battery" | "weak" | "ok";
   /** Plain words. Staff reading this are looking at a shelf, not a protocol. */
   label: string;
   tone: Tone;
@@ -74,6 +74,13 @@ export function tagStatus(tag: Tag): TagStatus {
 
   const and = (...parts: (string | null)[]) => parts.filter(Boolean).join(" · ");
 
+  // The latest command sent to the store's Pi for this tag.
+  const update = tag.latest_update;
+  const sending =
+    update && (update.status === "Pending" || update.status === "Dispatched")
+      ? "update sending"
+      : null;
+
   if (tag.signal === "never_heard") {
     return {
       key: "never_heard",
@@ -96,14 +103,30 @@ export function tagStatus(tag: Tag): TagStatus {
     };
   }
 
+  // The shelf may be showing old content. Ranked after the hearing problems,
+  // which usually explain the failure and say what to do about it.
+  if (update?.status === "Failed") {
+    return {
+      key: "update_failed",
+      label: "Update failed",
+      tone: "bad",
+      detail: and(
+        update.failure_code ? `the gateway reported ${update.failure_code}` : "the gateway couldn't apply it",
+        update.retryable === false ? "needs a person" : null,
+      ),
+      needsAttention: true,
+      rank: 2,
+    };
+  }
+
   if (tag.low_battery) {
     return {
       key: "low_battery",
       label: "Low battery",
       tone: "warn",
-      detail: and(battery ? `${battery} · swap it soon` : "swap it soon", power),
+      detail: and(battery ? `${battery} · swap it soon` : "swap it soon", power, sending),
       needsAttention: true,
-      rank: 2,
+      rank: 3,
     };
   }
 
@@ -112,9 +135,9 @@ export function tagStatus(tag: Tag): TagStatus {
       key: "weak",
       label: "Weak signal",
       tone: "warn",
-      detail: and(power, battery, heard),
+      detail: and(power, battery, heard, sending),
       needsAttention: true,
-      rank: 3,
+      rank: 4,
     };
   }
 
@@ -122,8 +145,8 @@ export function tagStatus(tag: Tag): TagStatus {
     key: "ok",
     label: "Working",
     tone: "ok",
-    detail: and(power, battery),
+    detail: and(power, battery, sending),
     needsAttention: false,
-    rank: 4,
+    rank: 5,
   };
 }

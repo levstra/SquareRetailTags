@@ -2,9 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { useMemo, useState } from "react";
 import clsx from "clsx";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { formatPrice, relativeTime, tagStatus, tagVariationLabel } from "../lib/format";
-import { useStores, useTags, type Tag } from "../lib/queries";
+import { useStoreNames, useStores, useTags, type Tag } from "../lib/queries";
 import { toneEdge } from "../lib/tone";
 import {
   Button,
@@ -27,11 +27,11 @@ function LocateButton({ tagId }: { tagId: string }) {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.POST("/tags/{tag_id}/locate", {
+      const { error, response } = await api.POST("/tags/{tag_id}/locate", {
         params: { path: { tag_id: tagId } },
-        body: {},
+        body: { seconds: 30 },
       });
-      if (error) throw error;
+      if (!response.ok) throw new ApiError(response, error);
     },
     onSuccess: () => {
       setState("queued");
@@ -86,9 +86,14 @@ function RawFields({ tag }: { tag: Tag }) {
         : "never",
     ],
     [
-      "Last pushed",
-      tag.last_pushed_at ? new Date(tag.last_pushed_at).toLocaleString() : "never",
+      "Latest update",
+      tag.latest_update
+        ? `${tag.latest_update.action} · ${tag.latest_update.status}${
+            tag.latest_update.failure_code ? ` (${tag.latest_update.failure_code})` : ""
+          }`
+        : "none sent",
     ],
+    ["Version", String(tag.version ?? 0)],
     ["Pricing", tag.pricing_type ?? "—"],
     ["Content hash", tag.content_hash ?? "—"],
     ["Variation", tag.variation_id ?? "unassigned"],
@@ -120,6 +125,7 @@ function LabelRow({
   const [open, setOpen] = useState(false);
   const status = tagStatus(tag);
   const variation = tagVariationLabel(tag);
+  const storeName = useStoreNames();
   const panelId = `tag-${tag.id}-detail`;
 
   return (
@@ -140,7 +146,7 @@ function LabelRow({
             )}
           </p>
           <p className="mt-1 text-xs text-faint">
-            <span className="font-mono">{tag.id}</span> · {tag.store_id}
+            <span className="font-mono">{tag.id}</span> · {storeName(tag.store_id)}
           </p>
         </div>
 

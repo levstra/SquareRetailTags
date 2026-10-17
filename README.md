@@ -12,30 +12,28 @@ talks to that store's tag hardware.
 Square (source of truth for price, all locations)
    │  read-only sync
    ▼
-ESL Pricing Service  ◄──polls──  Store A's Pi Gateway  ──local HTTP──►  Store A's labels
-(this repo, central)             (other dev's code)
+ESL Pricing Service  ──commands──►  Store A's Pi (WestgateLabels)  ──radio──►  Store A's tags
+(this repo, central) ◄──status, telemetry──
 
-                      ◄──polls──  Store B's Pi Gateway  ──local HTTP──►  Store B's labels
-                                  (other dev's code)
+                     ──commands──►  Store B's Pi (WestgateLabels)  ──radio──►  Store B's tags
+                     ◄──status, telemetry──
 ```
 
 - **Square** owns the price. This service never writes to Square — it only
   reads the catalog via `SearchCatalogObjects`, using a persisted sync
   cursor so it only pulls what changed since the last sync. Square lets a
   price be overridden per location; this service resolves that per store.
-- **This service** owns what each tag *should* display, for whichever store
-  it's assigned to. It projects the relevant Square fields (name, variation,
-  sku, store-resolved price, pricing type) into a `Tag` record, computes a
-  deterministic `content_hash` of that projection, and exposes it over
-  HTTP, scoped per store.
-- **Each store's Pi gateway** (built and owned separately) polls this
-  service for its own store's tags, compares `content_hash` to what it last
-  rendered, pushes new content to any tag whose hash changed, and reports
-  back what it actually displayed. It never invents price data or computes
-  hashes itself — it's a dumb, reliable effector. **It is never called by
-  this service** — its own local HTTP API is LAN-only and unreachable from
-  here (see "Bridging to the real gateway" below), so the relationship is
-  always poll-from-the-store, never push-from-the-center.
+- **This service** owns what each tag *should* display, for the store it
+  belongs to. It projects the relevant Square fields (name, variation, sku,
+  store-resolved price, pricing type) into a `Tag` record and computes a
+  deterministic `content_hash` of that projection. When the hash changes, it
+  queues one versioned label command for that store's Pi.
+- **Each store's Pi gateway** (`WestgateLabels`) long-polls this service for
+  its store's label commands (`Update`, `Unassign`, `Locate`), drives the tags
+  through its access points, and reports each command's outcome plus label
+  and access point telemetry. It never sees `content_hash`; this service
+  turns hash changes into versioned commands. This service never calls the
+  Pi: the Pi's own API is store-LAN-only, so the store always polls.
 
 A webhook from Square (`catalog.version.updated`) can also trigger a sync
 immediately instead of waiting for the next scheduled poll.
@@ -45,212 +43,127 @@ immediately instead of waiting for the next scheduled poll.
 | Path | Purpose |
 |---|---|
 | `src/esl/square/` | Only place allowed to import the Square SDK |
-| `src/esl/catalog/` | Square sync jobs, local catalog mirror, per-store price resolution (`pricing.py`) |
-| `src/esl/tags/` | Desired-state model, content hashing, drift detection |
+| `src/esl/catalog/` | Square sync jobs, local catalog mirror |
+| `src/esl/tags/` | Projection, content hashing, desired state, per-tag command status |
+| `src/esl/gateway/` | The Pi side: store keys and auth, command queue, status reports, telemetry, reconciliation |
+| `src/esl/jobs/` | Scheduled jobs (15-minute sync, command reconciliation, token refresh) |
 | `src/esl/web/` | FastAPI app — the HTTP contract described below |
-| `frontend/` | React/Vite admin UI for managing stores and assigning variations to tags |
-| `api/esl-pricing-api.yaml` | OpenAPI contract with each store's gateway (authoritative) |
-| `api/westgate-store-service.yaml` | Reference copy of the gateway's own local API (what it exposes to itself on the store LAN — not called by this service, see below) |
-| `scripts/gateway_sim.py` | Fake gateway for local testing without real hardware |
+| `frontend/` | React/Vite admin UI for assigning variations to tags |
+| `api/esl-pricing-api.yaml` | OpenAPI for this service (dashboard + the gateway section copied from the Pi contract) |
+| `api/westgate-store-service.yaml` | Reference copy of the Pi's own store-LAN API (not called by this service). Incomplete: some referenced schemas are missing; the Pi's repo is authoritative |
 
 ## Running it locally
 
 ```bash
 docker compose up -d      # postgres + redis
-make migrate               # alembic upgrade head
+make migrate               # alembic upgrade head (uses ADMIN_DATABASE_URL)
 make dev                   # uvicorn (port 8001) + vite, together
 ```
+
+The app connects as `esl_app_dev`, a login subject to Postgres row-level
+security; migrations use the `esl` owner login (`ADMIN_DATABASE_URL`).
+`Start-Dev.ps1` creates `esl_app_dev` automatically; without it, run
+`scripts/sql/dev_app_login.sql` once against the dev database. Copy both
+`DATABASE_URL` lines from `.env.example` into your `.env`.
+
+Tests need the same Postgres running; they create and use an `esl_test`
+database and never touch your dev data.
 
 `pytest` runs against recorded Square fixtures in `tests/fixtures/square/`,
 not the live sandbox.
 
-### Admin login (Auth0)
+### Sign-in (Cognito)
 
-The dashboard and its backing routes (`/catalog/variations`, `/admin/tags`,
-`/stores`, `PUT /tags/{tag_id}`) require an Auth0 login — any authenticated
-user gets full access; there are no roles. This is unrelated to the
-gateway's `X-Store-Key` (below), which is unaffected.
+The dashboard requires a Cognito login. One-time dev setup:
 
-First time setting up a new environment:
+1. `powershell -ExecutionPolicy Bypass -File .\scripts\dev_cognito.ps1 -DomainPrefix esl-dev-<yourname>`
+2. Put the printed values in `.env` and `frontend/.env.local`.
+   If the pool lives under a named AWS profile, set `AWS_PROFILE` in every
+   shell that runs `esl admin` or the backend. Both call Cognito.
+3. Bring your database up to date: `.venv\Scripts\python -m alembic upgrade head`.
+4. Give yourself access to the dev data (the default business):
+   `.venv\Scripts\esl admin invite-user --business 00000000-0000-0000-0000-000000000001 --email <you> --role owner`
+   Cognito emails a temporary password; you set a new one on first sign-in.
 
-1. Create an Auth0 tenant (free) if you don't have one.
-2. **Applications → Create Application → Single Page Application.** Under
-   its Settings, set Allowed Callback URLs / Logout URLs / Web Origins to
-   `http://localhost:5173` (add your production URL later, comma-separated
-   in the same fields). Copy the **Domain** and **Client ID**.
-3. **Applications → APIs → Create API.** Any identifier works (e.g.
-   `https://esl-pricing-api`) — it doesn't need to resolve to anything.
-   Copy the **Identifier**; that's the Audience.
-4. Backend — set in `.env`: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` (see
-   `.env.example`).
-5. Frontend — set in `frontend/.env`: `VITE_AUTH0_DOMAIN`,
-   `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE` (see
-   `frontend/.env.example`). These are public SPA identifiers, not
-   secrets — normal to ship in the built bundle. No client secret is used
-   anywhere; the SPA authenticates via PKCE and the backend verifies token
-   signatures against Auth0's public JWKS.
+New client businesses: `esl admin create-business --name "<name>" --owner-email <owner>`.
+Owners invite staff from the dashboard's Staff tab.
 
-Once both are set, `POST /stores` (and the other admin routes) need a
-bearer token — the easiest way to get one for a `curl` test is to open the
-dashboard, log in, and copy the token from your browser's network tab, or
-just drive everything through the dashboard itself:
+### Connecting Square
 
-```bash
-curl -X POST localhost:8001/v1/stores \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"id": "downtown", "name": "Downtown", "square_location_id": "L_ABC123"}'
-# → { "id": "downtown", ..., "api_key": "<shown once>" }
-```
+Each business connects its own Square account (read-only: catalog and
+locations). There is no global Square token. If you are upgrading from step 2,
+delete `SQUARE_TOKEN` (and `DEFAULT_BUSINESS_ID` if present) from your `.env`:
+the app now refuses unknown settings at startup.
 
-Then try the central contract without a Pi:
+One-time dev setup in the Square Developer Console (your app, **Sandbox**):
 
-```bash
-python scripts/gateway_sim.py --key <api_key> --url http://localhost:8001 --interval 5
-```
+1. **OAuth** page → Redirect URL: `http://localhost:5173/v1/square/oauth/callback` → Save.
+   Copy the sandbox application secret into `SQUARE_APPLICATION_SECRET`.
+2. **Credentials** page → copy the sandbox application ID into `SQUARE_APPLICATION_ID`.
+3. **Webhooks → Subscriptions** → your subscription → Edit → events
+   `catalog.version.updated` and `oauth.authorization.revoked`. The URL must
+   equal `SQUARE_WEBHOOK_URL`.
+4. Generate `TOKEN_ENCRYPTION_KEY` (command in `.env.example`).
 
-It polls `/v1/tags` with that store's key, "renders" any tag whose hash
-changed, and posts a confirmation back. It only exercises *this service's*
-contract, though — see the next section for what a real gateway also has to
-do against its own local Pi.
+Then, signed in to the dashboard as an owner: **Square** tab → **Connect
+Square** → approve → choose your locations → **Save stores**. Prices sync
+right away, on every Square webhook, and every 15 minutes as a safety net.
+
+Tip for sandbox: open your sandbox test account's Square Dashboard from the
+Developer Console first ("Sandbox test accounts" → "Open in Square
+Dashboard"), so the approval page is already signed in to it.
+
+Production deployment: see docs/deploy.md.
 
 ---
 
-## API calls for the Pi gateway
+## The Pi gateway contract
 
-This is the contract the store side needs to implement against *this*
-service. Full schema detail lives in `api/esl-pricing-api.yaml` — treat
-that file as the source of truth if anything here goes stale. Base path is
-`/v1`. Tag ids are 12-character hex, case-insensitive in, upper-case out.
+The store Pi (`WestgateLabels`) defines the contract this service implements:
+`../WestgateLabels/WestgateLabels/docs/CENTRAL-API-CONTRACT.md` and
+`central-api.openapi.yaml` there. Three endpoints, all with the store's key in
+`X-Api-Key`:
 
-### 1. `GET /tags` — poll for this store's changes
+- `GET /api/label-updates/pending?storeId=&limit=&wait=` — commands to run
+- `POST /api/label-updates/status` — batched outcomes (`acceptedCount` must equal the batch size)
+- `POST /api/labels/telemetry` — label and access point snapshots
 
-Requires header `X-Store-Key: <this store's api_key>` (from `POST /stores`).
-Returns **every** tag belonging to that store — never another store's:
+Keys and store codes are issued by the operator:
+`esl admin set-store-code --store <id> --code STORE-001`, then
+`esl admin add-gateway --business <id> --store <id> --name "Front counter Pi"`
+(prints the key once). On the Pi set `CentralApi__BaseUrl`,
+`CentralApi__StoreId` and `CentralApi__ApiKey`.
 
-```json
-{
-  "tags": [
-    {
-      "id": "A1B2C3D4E5F6",
-      "store_id": "downtown",
-      "variation_id": "SQ_VAR_123",
-      "name": "Cold Brew Concentrate",
-      "variation_name": "32 oz",
-      "sku": "CB-32",
-      "price": 1499,
-      "pricing_type": "FIXED_PRICING",
-      "content_hash": "9f86d081884c7d65...",
-      "last_pushed_at": "2026-09-05T14:02:11Z",
-      "last_confirmed_at": "2026-09-05T14:02:14Z",
-      "battery_pct": 87
-    }
-  ]
-}
+Day to day, nothing needs running by hand. A price change in Square reaches
+this service via webhook (or the 15-minute sync), changes the tag's
+`content_hash`, and queues an `Update`; the Pi picks it up on its next long
+poll, usually within a second. Pairing a tag in the dashboard does the same.
+
+`esl admin push-all --business <id> [--store <id>]` re-sends every tag's
+current state even though nothing changed. Run it once after migrating an
+existing database to `0006`, and after replacing a Pi. Existing tags start at
+version 0 and are only sent a command when their content changes, so without
+it they get nothing.
+
+Downgrading migration `0006` is destructive and effectively one-way once a Pi
+has received commands: versions restart at 0, and the Pi (which keeps the
+highest version it applied per tag) reports every later update as Superseded.
+
+### Running the Pi service against your local API
+
+With `make dev` running (API on port 8001), issue a key as above, then in
+`../WestgateLabels`:
+
+```powershell
+$env:CentralApi__BaseUrl = 'http://localhost:8001/'
+$env:CentralApi__StoreId = 'STORE-001'
+$env:CentralApi__ApiKey = '<the rtg_live_ key>'
+$env:Pipeline__DatabasePath = "$env:TEMP\westgate-dev.db"
+dotnet run --project WestgateLabels
 ```
 
-`price` is already resolved for this store — if Square has a location
-override for this store, it's already applied. The gateway never needs to
-know that overrides exist.
-
-**What the gateway should do with it:**
-- For each tag, compare `content_hash` to the hash it last rendered for
-  that tag ID (keep this in local gateway state — this service doesn't
-  track "last rendered by gateway", only "last confirmed").
-- If the hash is unchanged, skip it — nothing to do.
-- If `content_hash` is `null`, the tag is unassigned.
-- Otherwise, render it. **Never divide `price` by 100 for logic, only for
-  display** — it's an integer in cents ($14.99 = `1499`).
-
-### 2. `GET /tags/{tag_id}` — fetch one tag
-
-Same auth and shape as above, same store-scoping (404 if the tag belongs to
-a different store or doesn't exist). Useful for re-checking one tag without
-pulling the whole fleet.
-
-### 3. `POST /tags/{tag_id}/confirm` — report a successful render
-
-Same `X-Store-Key` auth. **Call this immediately after the tag hardware
-confirms it displayed the new content.**
-
-```json
-// request
-{ "content_hash": "9f86d081884c7d65...", "battery_pct": 87 }
-```
-
-- `content_hash`: the hash of what was *actually* rendered — i.e. echo
-  back the value that came from `/tags`. This is what drift detection is
-  built on, so don't fudge it or send a hash the service didn't hand you.
-- `battery_pct`: optional (0–100), but send it whenever the tag hardware
-  reports one — it's how we'll know when to swap batteries in the field.
-- Response is `204 No Content` on success, `404` if `tag_id` is unknown or
-  belongs to a different store.
-
-### 4. `GET /health` — liveness check
-
-Returns `{"status": "ok"}`. Fine to use for a startup check or basic
-connectivity test from the gateway. No auth required.
-
-### Not for the gateway
-
-- `GET /catalog/variations`, `GET /admin/tags`, `POST /stores`, `PUT
-  /tags/{tag_id}` are admin-dashboard calls, gated by Auth0 login (see
-  "Admin login" below) — not by `X-Store-Key`. The gateway should never
-  need to call these, and couldn't authenticate to them if it tried; it
-  only discovers its own assignments through `GET /tags`.
-
-### Suggested gateway loop, against this service
-
-```
-every N seconds:
-    tags = GET /tags   (X-Store-Key: this store's key)
-    for tag in tags:
-        if tag.content_hash is None:
-            continue                      # unassigned, nothing to show
-        if tag.content_hash == last_rendered[tag.id]:
-            continue                      # already up to date
-        render_to_hardware(tag)           # this is where Westgate comes in — see below
-        POST /tags/{tag.id}/confirm { content_hash: tag.content_hash, battery_pct }
-        last_rendered[tag.id] = tag.content_hash
-```
-
-That's the whole contract with *this* service: poll, compare hashes, render,
-confirm. It never needs to know anything about Square, pricing sync, stores,
-or how the hash is computed — it just mirrors whatever hash this service
-hands it, scoped to its own store.
-
-## Bridging to the real gateway (Westgate)
-
-The gateway's `render_to_hardware(tag)` step above isn't a black box on our
-side anymore — its local HTTP API is documented in
-`api/westgate-store-service.yaml` (served by the Pi itself, on the store LAN
-only, port 5000; unreachable from this service, which is why the gateway
-must be the one polling, never the one being called). This is what the
-`render_to_hardware` step should actually do:
-
-| This service's `Tag` says... | Call on the Pi (Westgate API) |
-|---|---|
-| `content_hash` changed, `pricing_type` is `FIXED_PRICING` | `POST /api/labels/{tagId}/product` with a `Display` body: `{ itemName: name, variationName: variation_name, sku, price: { amount: "<price/100 as a decimal string>", currency: "USD" } }` |
-| `content_hash` changed, `pricing_type` is `VARIABLE_PRICING` (`price` is `null`) | Westgate's `Display.price` is *required* — there's nothing to put there. Use `POST /api/labels/{tagId}/test?text=<name> — See Register` instead of the product template. |
-| `content_hash` changed, tag is unassigned (`content_hash` corresponds to no variation) | `POST /api/labels/{tagId}/unassign` |
-| Any push, once queued | The Pi's response is a `LabelUpdate` whose `status` reaches `Succeeded`/`Failed`/`Superseded` — with the default `wait=true` this happens in the same call (blocks up to ~30s). Only call this service's `POST /tags/{tag_id}/confirm` once you have a terminal status, and only for `Succeeded` (use whatever battery/telemetry `GET /api/labels/{tagId}` on the Pi reports for `battery_pct`) |
-
-**Money boundary:** this service's `price` is an integer in cents (never a
-float, never divided before rendering — same rule as everywhere else in
-this codebase). Westgate's `Money.amount` is a decimal string. Convert with
-integer arithmetic, never a float division:
-
-```python
-cents = tag["price"]                                    # e.g. 1499
-amount = f"{cents // 100}.{cents % 100:02d}"             # "14.99"
-```
-
-**Tag id boundary:** both sides now agree — 12 hex characters,
-case-insensitive on input, upper-case on output. No conversion needed.
-
-**Note:** the Westgate spec as checked in at
-`api/westgate-store-service.yaml` was pasted in during planning and is
-missing a few referenced schemas (`LabelUpdate`, `LabelTelemetry`,
-`FailureCode`, and others — see the note at the top of that file). Get the
-complete file from the gateway team before treating anything past that
-point as settled.
+The Pi logs `Polling central API http://localhost:8001/ for store STORE-001`
+and the gateway's `last_seen_at` updates. A wrong key gets `401` and a wrong
+`StoreId` gets `403`. Either way the Pi logs the status and backs off up to
+60 s. If an access point is connected to this PC, commands are really sent to
+tags in range, so pair only tags you mean to change.

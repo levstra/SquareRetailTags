@@ -1,44 +1,91 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { api } from "../api/client";
-import { useStores } from "../lib/queries";
-import { Button, Field, Modal, TextInput } from "../ui";
+import { useQuery } from "@tanstack/react-query";
+import { api, ApiError } from "../api/client";
+import { relativeTime } from "../lib/format";
+import { errorMessage, useStores, type Store } from "../lib/queries";
+import { Button, Modal, StatusLabel } from "../ui";
 
-export function StoresModal({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [id, setId] = useState("");
-  const [squareLocationId, setSquareLocationId] = useState("");
-  const [error, setError] = useState("");
-  const [newKey, setNewKey] = useState<{ storeId: string; apiKey: string } | null>(
-    null,
-  );
+/** A gateway that polled within this window counts as online. The Pi
+ * long-polls every few seconds and posts telemetry every minute. */
+const ONLINE_WITHIN_MS = 5 * 60_000;
 
-  const { data: storeData } = useStores();
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!id || !name || !squareLocationId) {
-        throw new Error("id, name, and square_location_id are all required");
-      }
-      const { data, error } = await api.POST("/stores", {
-        body: { id, name, square_location_id: squareLocationId },
+function GatewayStatus({ store }: { store: Store }) {
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["store-gateways", store.id],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/stores/{store_id}/gateways", {
+        params: { path: { store_id: store.id } },
       });
-      if (error) throw error;
-      return data as { id: string; api_key: string };
+      if (!response.ok || !data) throw new ApiError(response, error);
+      return data;
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["stores"] });
-      setNewKey({ storeId: data.id, apiKey: data.api_key });
-      setId("");
-      setName("");
-      setSquareLocationId("");
-      setError("");
+    refetchInterval: 30_000,
+  });
+
+  if (isLoading) return <p className="text-xs text-faint">Checking gateway…</p>;
+  if (error) return <p className="text-xs text-bad">{errorMessage(error)}</p>;
+
+  const gateways = (data?.gateways ?? []).filter((g) => !g.revoked);
+  if (gateways.length === 0) {
+    return (
+      <StatusLabel tone="idle">No gateway installed</StatusLabel>
+    );
+  }
+
+  const aps = data?.access_points ?? [];
+  const apsUp = aps.filter((ap) => ap.connected && !ap.stale).length;
+
+  return (
+    <div className="flex flex-col gap-1">
+      {gateways.map((g) => {
+        const online =
+          g.last_seen_at != null &&
+          Date.now() - new Date(g.last_seen_at).getTime() < ONLINE_WITHIN_MS;
+        return (
+          <div key={g.id}>
+            <StatusLabel tone={online ? "ok" : "bad"}>
+              {g.name}: {online ? "online" : "offline"}
+            </StatusLabel>
+            <p className="text-xs text-faint">
+              {g.last_seen_at ? `last polled ${relativeTime(g.last_seen_at)}` : "never polled"}
+              {" · "}
+              <span className="font-mono">{g.key_prefix}</span>
+            </p>
+          </div>
+        );
+      })}
+      {aps.length > 0 && (
+        <p className="text-xs text-muted">
+          {apsUp} of {aps.length} access point{aps.length === 1 ? "" : "s"} connected
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Read-only. Stores come from the business's Square locations (owners choose
+ * them on the Square screen); gateway keys are issued by the installer with
+ * `esl admin add-gateway` and never shown in the browser. */
+export function StoresModal({
+  isOwner,
+  onClose,
+}: {
+  isOwner: boolean;
+  onClose: () => void;
+}) {
+  const { data: storeData, error } = useStores();
+  const { data: locationData } = useQuery({
+    queryKey: ["square-locations"],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/square/locations");
+      if (!response.ok || !data) throw new ApiError(response, error);
+      return data.locations;
     },
-    onError: (e: Error) => setError(e.message),
+    enabled: isOwner,
   });
 
   const stores = storeData ?? [];
+  const locationName = (storeId: string) =>
+    locationData?.find((l) => l.store_id === storeId)?.name;
 
   return (
     <Modal
@@ -46,84 +93,41 @@ export function StoresModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       wide
       footer={
-        <>
-          <Button variant="quiet" onClick={onClose}>
-            Close
-          </Button>
-          <Button
-            variant="primary"
-            disabled={mutation.isPending}
-            onClick={() => mutation.mutate()}
-          >
-            {mutation.isPending ? "Creating…" : "Create store"}
-          </Button>
-        </>
+        <Button variant="quiet" onClick={onClose}>
+          Close
+        </Button>
       }
     >
-      <ul className="mb-6 flex max-h-48 list-none flex-col gap-0 overflow-y-auto p-0">
+      {error && <p className="mb-4 text-sm text-bad">{errorMessage(error)}</p>}
+
+      <ul className="mb-5 flex list-none flex-col gap-0 p-0">
         {stores.length === 0 && (
           <li className="py-2 text-sm text-faint">No stores yet.</li>
         )}
-        {stores.map((s) => (
-          <li
-            key={s.id}
-            className="flex items-center justify-between gap-3 border-b border-line-soft py-2.5 text-sm last:border-0"
-          >
-            <span className="font-medium text-ink">{s.name}</span>
-            <span className="font-mono text-xs text-faint">{s.id}</span>
-          </li>
-        ))}
+        {stores.map((s) => {
+          const location = locationName(s.id);
+          return (
+            <li
+              key={s.id}
+              className="flex flex-wrap items-start justify-between gap-3 border-b border-line-soft py-3 last:border-0"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">{s.name}</p>
+                {location && (
+                  <p className="mt-0.5 text-xs text-faint">Square location: {location}</p>
+                )}
+              </div>
+              {isOwner && <GatewayStatus store={s} />}
+            </li>
+          );
+        })}
       </ul>
 
-      {newKey && (
-        <div className="mb-5 rounded-xl border border-line bg-warn-tint p-3.5">
-          <p className="text-sm font-semibold text-warn">
-            API key for {newKey.storeId} — shown once, save it now
-          </p>
-          <code className="mt-1.5 block font-mono text-xs break-all text-ink">
-            {newKey.apiKey}
-          </code>
-          <p className="mt-2 text-xs text-muted">
-            This is the <span className="font-mono">X-Store-Key</span> that
-            store’s gateway sends when it polls for its labels.
-          </p>
-        </div>
-      )}
-
-      <h3 className="mb-3 text-xs font-bold tracking-wider text-muted uppercase">
-        Add a store
-      </h3>
-      <div className="flex flex-col gap-3.5">
-        <Field label="Store ID" hint="Short and lowercase, e.g. westgate">
-          <TextInput
-            placeholder="westgate"
-            className="font-mono"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-          />
-        </Field>
-        <Field label="Store name">
-          <TextInput
-            placeholder="Westgate"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
-        <Field
-          label="Square location ID"
-          hint="Which Square location resolves this store’s price overrides"
-        >
-          <TextInput
-            placeholder="L8MN4PQR2STUV"
-            className="font-mono"
-            value={squareLocationId}
-            onChange={(e) => setSquareLocationId(e.target.value)}
-          />
-        </Field>
-        {error && (
-          <p className="rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">{error}</p>
-        )}
-      </div>
+      <p className="text-xs text-muted">
+        {isOwner
+          ? "Stores come from your Square locations. Choose them on the Square screen. Gateways are set up by your installer."
+          : "Stores come from the business's Square locations. Ask the owner if one is missing."}
+      </p>
     </Modal>
   );
 }

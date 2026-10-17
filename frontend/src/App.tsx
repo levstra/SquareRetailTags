@@ -1,20 +1,25 @@
-import { useAuth0 } from "@auth0/auth0-react";
+import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
-import { setTokenGetter } from "./api/client";
+import { api, ApiError, clearRedirectMarker } from "./api/client";
+import { signOut } from "./auth/userManager";
 import { AssignModal, type AssignTarget } from "./features/AssignModal";
 import { ItemDetailModal } from "./features/ItemDetailModal";
 import { LabelList } from "./features/LabelList";
 import { ProductList } from "./features/ProductList";
 import { StoresModal } from "./features/StoresModal";
 import type { Variation } from "./lib/queries";
+import { navigate } from "./router";
+import { SquareSettings } from "./square/SquareSettings";
+import { squareConnectionQuery } from "./square/queries";
+import { StaffPanel } from "./staff/StaffPanel";
 import { Button, ThemeToggle } from "./ui";
 
-type View = "labels" | "products";
+type View = "labels" | "products" | "staff" | "square";
 
 /** The wordmark. The rounded rectangle is a shelf label with a price line —
  * swap it for the company mark when there is one. */
-function Logo() {
+export function Logo() {
   return (
     <span className="flex items-center gap-2.5">
       <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
@@ -63,50 +68,51 @@ function NavLink({
   );
 }
 
+// Square's OAuth callback lands on /settings/square?result=...
+const returnedFromSquare = window.location.pathname === "/settings/square";
+const squareResult = returnedFromSquare
+  ? new URLSearchParams(window.location.search).get("result")
+  : null;
+
 export default function App() {
-  const {
-    isLoading,
-    isAuthenticated,
-    loginWithRedirect,
-    logout,
-    getAccessTokenSilently,
-    user,
-  } = useAuth0();
-
-  useEffect(() => {
-    setTokenGetter(getAccessTokenSilently);
-  }, [getAccessTokenSilently]);
-
-  const [view, setView] = useState<View>("labels");
+  const [view, setView] = useState<View>(returnedFromSquare ? "square" : "labels");
   const [assigning, setAssigning] = useState<AssignTarget | "new" | null>(null);
   const [selected, setSelected] = useState<Variation | null>(null);
   const [storesOpen, setStoresOpen] = useState(false);
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted">
-        Loading…
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (window.location.pathname !== "/") window.history.replaceState({}, document.title, "/");
+  }, []);
 
-  if (!isAuthenticated) {
+  const { data: me, error: meError } = useQuery({
+    queryKey: ["me"],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/me");
+      if (!response.ok || !data) throw new ApiError(response, error);
+      clearRedirectMarker();
+      return data;
+    },
+    retry: false,
+  });
+
+  const { data: square } = useQuery({ ...squareConnectionQuery, enabled: !!me });
+  const squareNeedsAttention = square != null && square.status !== "active";
+  const isOwner = me?.role === "owner";
+
+  if (meError) {
+    const detail = meError instanceof ApiError ? meError.detail : null;
+    const meUnauthorized = meError instanceof ApiError && meError.status === 401;
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-5 px-6">
         <Logo />
-        <p className="text-center text-sm text-muted">
-          Sign in to manage shelf labels and stores.
+        <p className="max-w-md text-center text-sm text-bad">
+          {meUnauthorized
+            ? "We couldn't verify your sign-in. Try signing out and in again; if it keeps happening, sign-in may be misconfigured."
+            : (detail ?? "Your account doesn't have access to this dashboard.")}
         </p>
-        <Button
-          variant="primary"
-          className="min-h-11 px-5"
-          onClick={() => loginWithRedirect()}
-        >
-          Log in
+        <Button variant="secondary" onClick={() => void signOut()}>
+          Sign out
         </Button>
-        <div className="mt-2">
-          <ThemeToggle />
-        </div>
       </div>
     );
   }
@@ -114,48 +120,86 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="flex flex-wrap items-center gap-x-6 gap-y-3.5 border-b border-line-soft px-7 py-4">
-        <Logo />
+        <div className="flex flex-col">
+          <Logo />
+          {me?.business.name && (
+            <span className="mt-0.5 pl-[34px] text-xs text-faint">{me.business.name}</span>
+          )}
+        </div>
 
-        <nav className="flex gap-1" aria-label="Main">
+        <nav className="flex flex-wrap gap-1" aria-label="Main">
           <NavLink active={view === "labels"} onClick={() => setView("labels")}>
             Labels
           </NavLink>
           <NavLink active={view === "products"} onClick={() => setView("products")}>
             Products
           </NavLink>
+          {isOwner && (
+            <NavLink active={view === "staff"} onClick={() => setView("staff")}>
+              Staff
+            </NavLink>
+          )}
+          {isOwner && (
+            <NavLink active={view === "square"} onClick={() => setView("square")}>
+              Square
+            </NavLink>
+          )}
         </nav>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2.5">
           <ThemeToggle />
+          <Button onClick={() => navigate("/pair")}>Pair tags</Button>
           <Button onClick={() => setStoresOpen(true)}>Stores</Button>
-          {user?.email && (
-            <span className="text-[13px] text-faint">{user.email}</span>
+          {me?.email && (
+            <span className="text-[13px] text-faint">
+              {me.email} · {me.role}
+            </span>
           )}
-          <Button
-            variant="quiet"
-            onClick={() =>
-              logout({ logoutParams: { returnTo: window.location.origin } })
-            }
-          >
-            Log out
+          <Button variant="quiet" onClick={() => void signOut()}>
+            Sign out
           </Button>
         </div>
       </header>
 
+      {squareNeedsAttention && (
+        <div className="border-b border-line-soft bg-warn-tint px-7 py-2.5 text-sm text-warn">
+          {isOwner ? (
+            <>
+              Prices aren't syncing from Square.{" "}
+              <button
+                type="button"
+                className="font-semibold underline"
+                onClick={() => setView("square")}
+              >
+                {square?.status === "not_connected" ? "Connect Square" : "Reconnect Square"}
+              </button>
+            </>
+          ) : (
+            "Prices aren't syncing from Square. Ask the business owner to reconnect Square."
+          )}
+        </div>
+      )}
+
       <main className="mx-auto max-w-5xl px-6 py-9 pb-14">
-        {view === "labels" ? (
+        {view === "square" && !me ? (
+          <p className="py-12 text-center text-sm text-muted">Loading…</p>
+        ) : view === "staff" && isOwner ? (
+          <StaffPanel />
+        ) : view === "square" && isOwner ? (
+          <SquareSettings result={squareResult} />
+        ) : view === "products" ? (
+          <ProductList onSelect={setSelected} />
+        ) : (
           <LabelList
             onAddTag={() => setAssigning("new")}
             onAssign={(tag) =>
               setAssigning({
                 tagId: tag.id,
-                storeId: tag.store_id,
+                storeId: tag.store_id ?? undefined,
                 variationId: tag.variation_id,
               })
             }
           />
-        ) : (
-          <ProductList onSelect={setSelected} />
         )}
       </main>
 
@@ -170,7 +214,9 @@ export default function App() {
         />
       )}
 
-      {storesOpen && <StoresModal onClose={() => setStoresOpen(false)} />}
+      {storesOpen && (
+        <StoresModal isOwner={isOwner} onClose={() => setStoresOpen(false)} />
+      )}
     </div>
   );
 }

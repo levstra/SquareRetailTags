@@ -1,80 +1,92 @@
+import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, TIMESTAMP, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, ForeignKeyConstraint, Index, Integer, TIMESTAMP, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+import esl.businesses.models  # noqa: F401  (registers businesses/stores tables)
 from esl.db import Base
-
-
-class Store(Base):
-    __tablename__ = "stores"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    square_location_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    api_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
 
 class CatalogItem(Base):
     __tablename__ = "catalog_items"
 
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
 
-    variations: Mapped[list["CatalogVariation"]] = relationship(
-        back_populates="item", cascade="all, delete-orphan"
-    )
-
 
 class CatalogVariation(Base):
     __tablename__ = "catalog_variations"
-    __table_args__ = (Index("catalog_variations_item_id", "item_id"),)
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    item_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("catalog_items.id", ondelete="CASCADE"), nullable=False
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["business_id", "item_id"],
+            ["catalog_items.business_id", "catalog_items.id"],
+            ondelete="CASCADE",
+            name="catalog_variations_item_fkey",
+        ),
+        Index("catalog_variations_item_id", "business_id", "item_id"),
+        Index("catalog_variations_business_gtin", "business_id", "gtin"),
+        Index("catalog_variations_business_sku", "business_id", "sku"),
     )
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    item_id: Mapped[str] = mapped_column(Text, nullable=False)
     variation_name: Mapped[str] = mapped_column(Text, nullable=False)
     sku: Mapped[str | None] = mapped_column(Text)
+    # Square's `upc` field (any GTIN: UPC-A, EAN-13, EAN-8, GTIN-14). Used by
+    # scan lookup only; deliberately NOT part of the tag projection.
+    gtin: Mapped[str | None] = mapped_column(Text)
     price: Mapped[int | None] = mapped_column(Integer)
-    # ISO 4217, straight from Square's price_money. Needed because the
-    # gateway's Money schema requires a currency alongside the amount;
-    # the /v1 contract never carried one.
-    currency: Mapped[str | None] = mapped_column(Text)
     pricing_type: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str | None] = mapped_column(Text)  # ISO 4217, from Square price_money
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-
-    item: Mapped[CatalogItem] = relationship(back_populates="variations")
-    location_prices: Mapped[list["CatalogVariationLocationPrice"]] = relationship(
-        back_populates="variation", cascade="all, delete-orphan", lazy="raise"
+    present_at_all_locations: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    present_at_location_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'")
+    )
+    absent_at_location_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'")
     )
 
-
-class CatalogVariationLocationPrice(Base):
-    """Per-location price override (Square's `location_overrides`).
-
-    Absence of a row for a given variation/location means the flat
-    `CatalogVariation.price` applies there.
-    """
-
-    __tablename__ = "catalog_variation_location_prices"
-    __table_args__ = (
-        UniqueConstraint("variation_id", "square_location_id"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    variation_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("catalog_variations.id", ondelete="CASCADE"), nullable=False
-    )
-    square_location_id: Mapped[str] = mapped_column(Text, nullable=False)
-    price: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    variation: Mapped[CatalogVariation] = relationship(back_populates="location_prices")
+    item: Mapped[CatalogItem] = relationship(viewonly=True)
 
 
 class SyncCursor(Base):
     __tablename__ = "sync_cursors"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
     latest_time: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class VariationLocationPrice(Base):
+    """Square's per-location price override, resolved at sync time."""
+
+    __tablename__ = "variation_location_prices"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["business_id", "variation_id"],
+            ["catalog_variations.business_id", "catalog_variations.id"],
+            ondelete="CASCADE",
+            name="variation_location_prices_variation_fkey",
+        ),
+    )
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    variation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    square_location_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    price: Mapped[int | None] = mapped_column(Integer)
+    pricing_type: Mapped[str] = mapped_column(Text, nullable=False)
