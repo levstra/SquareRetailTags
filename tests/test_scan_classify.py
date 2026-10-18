@@ -33,6 +33,12 @@ def test_all_digit_unknown_is_a_product():
     assert classify("840001262051", known_tag_ids={"840001262D51"}) == "product"
 
 
+def test_all_digit_not_in_catalog_is_a_tag():
+    assert classify("840001262051", known_tag_ids=set(), in_catalog=False) == "tag"
+    # Only a 12-hex shape can be a tag, catalog or not.
+    assert classify("4006381333931", known_tag_ids=set(), in_catalog=False) == "product"
+
+
 @pytest.mark.parametrize("code", ["", "   ", "\n"])
 def test_empty_scan(code):
     with pytest.raises(EmptyScan):

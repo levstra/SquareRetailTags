@@ -25,7 +25,8 @@ def normalize_tag_id(code: str) -> str | None:
     return value if _TAG_ID.fullmatch(value) else None
 
 
-def classify(code: str, *, known_tag_ids: set[str]) -> ScanKind:
+def classify(code: str, *, known_tag_ids: set[str], in_catalog: bool = True) -> ScanKind:
+    """`in_catalog`: some product in this business has this code as its GTIN or SKU."""
     if not code.strip():
         raise EmptyScan()
     tag_id = normalize_tag_id(code)
@@ -33,8 +34,9 @@ def classify(code: str, *, known_tag_ids: set[str]) -> ScanKind:
         return "product"
     if _HEX_LETTER.search(tag_id):
         return "tag"
-    # 12 digits: also a valid UPC-A. Only a tag if this business already knows it.
-    return "tag" if tag_id in known_tag_ids else "product"
+    # 12 digits: also a valid UPC-A. A tag if this business already knows it as one,
+    # or if no product has this code (a new tag the Pi hasn't heard yet).
+    return "tag" if tag_id in known_tag_ids or not in_catalog else "product"
 
 
 def gtin_candidates(code: str) -> list[str]:
