@@ -5,34 +5,38 @@ const REPEAT_MS = 2000; // the same code held in view is reported once per 2 s
 
 interface Props {
   onScan: (code: string) => void;
-  // The page falls back to the handheld scanner while the camera can't be used.
-  onError?: (message: string) => void;
 }
 
-export function CameraScanner({ onScan, onError }: Props) {
+export function CameraScanner({ onScan }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onScanRef = useRef(onScan);
-  const onErrorRef = useRef(onError);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     onScanRef.current = onScan;
-    onErrorRef.current = onError;
-  }, [onScan, onError]);
+  }, [onScan]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let timer: number | undefined;
     let stopped = false;
     let last = { code: "", at: 0 };
+    let loggedFailure = false;
     const detector = createDetector();
 
     const start = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          // Without a size, phones give 640x480: too few pixels for a 12-char Code 128 tag barcode
+          // unless it fills the frame. Ask for 1080p; the camera falls back to what it has.
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
         });
+        const [track] = stream.getVideoTracks();
+        // Continuous autofocus where supported (Android Chrome); ignored elsewhere.
+        await track
+          ?.applyConstraints({ advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet] })
+          .catch(() => {});
         const video = videoRef.current;
         if (stopped || !video) {
           // Unmounted (or toggled off) while the permission prompt was open.
@@ -52,8 +56,11 @@ export function CameraScanner({ onScan, onError }: Props) {
                 onScanRef.current(hit.rawValue);
               }
             }
-          } catch {
-            // Frame not decodable yet; try the next one.
+          } catch (e) {
+            // An undecodable frame returns no hits; a throw means the decoder itself failed
+            // (e.g. its .wasm didn't load). Say so once, or it looks like "no barcode found".
+            if (!loggedFailure) console.error("Barcode decoder failed", e);
+            loggedFailure = true;
           }
           timer = window.setTimeout(tick, 250);
         };
@@ -62,7 +69,6 @@ export function CameraScanner({ onScan, onError }: Props) {
         if (stopped) return;
         const message = e instanceof Error ? e.message : "Camera unavailable";
         setError(message);
-        onErrorRef.current?.(message);
       }
     };
     void start();

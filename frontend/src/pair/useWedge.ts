@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { WedgeBuffer } from "./wedge";
 
-export function useWedge(enabled: boolean, onScan: (code: string) => void): void {
+export function useWedge(onScan: (code: string) => void): void {
   // Keep the latest callback without rebuilding the listener, so a re-render
   // mid-scan doesn't reset the buffer and emit a truncated code.
   const onScanRef = useRef(onScan);
@@ -10,7 +10,6 @@ export function useWedge(enabled: boolean, onScan: (code: string) => void): void
   }, [onScan]);
 
   useEffect(() => {
-    if (!enabled) return;
     const buffer = new WedgeBuffer();
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -28,5 +27,5 @@ export function useWedge(enabled: boolean, onScan: (code: string) => void): void
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [enabled]);
+  }, []);
 }
