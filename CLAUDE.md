@@ -34,7 +34,9 @@ The Pi's own store-LAN API (how it pushes to labels) is
 - `content_hash` is internal. The gateway sees versioned commands
   (`Update`, `Unassign`, `Locate`) in `label_updates`. Display commands are
   created only by `esl.tags.desired.apply_desired_state` when the hash
-  changes, by retries of retryable failures, and by `esl admin push-all`.
+  changes, by retries of failures (`gateway.commands.retry_delay`: retryable
+  ones up to 3 times, a first `LabelHardwareError` once), and by
+  `esl admin push-all`.
   `apply_desired_state(resend_unconfirmed=True)` also resends an unchanged
   state whose latest display version ended Superseded/Failed (never a
   confirmed or in-flight one): on a store move, when the Pi rejects

@@ -14,11 +14,14 @@ const FAILURES: Record<string, string> = {
   ApUnavailable: "No access point online in this store",
   ApTimeout: "Access point did not answer",
   ApQueueFull: "Access point is busy",
-  LabelRejectedKey: "Label rejected the update (key mismatch) — needs attention",
-  LabelHardwareError: "Label hardware error — needs attention",
+  LabelRejectedKey: "Label rejected the update (key mismatch)",
+  LabelHardwareError: "Label hardware error",
   RenderError: "The gateway couldn't draw this label",
   InvalidCommand: "The gateway rejected this update",
 };
+
+// Faults on the label itself: once the service stops retrying, someone has to go look.
+const NEEDS_A_PERSON = new Set(["LabelRejectedKey", "LabelHardwareError"]);
 
 export function statusMessage(
   u: Pick<Summary, "action" | "status" | "failure_code" | "retryable">,
@@ -39,9 +42,11 @@ export function statusMessage(
     case "Failed": {
       const reason = (u.failure_code && FAILURES[u.failure_code]) || "Update failed";
       // Locate is never retried by the service, so don't promise it.
-      return u.retryable && u.action !== "Locate"
-        ? { tone: "warning", text: `${reason} — retrying automatically`, final: true }
-        : { tone: "error", text: reason, final: true };
+      if (u.retryable && u.action !== "Locate") {
+        return { tone: "warning", text: `${reason} — retrying automatically`, final: true };
+      }
+      const ask = u.failure_code && NEEDS_A_PERSON.has(u.failure_code) ? " — needs attention" : "";
+      return { tone: "error", text: `${reason}${ask}`, final: true };
     }
     default:
       return { tone: "pending", text: "Sending…", final: false };

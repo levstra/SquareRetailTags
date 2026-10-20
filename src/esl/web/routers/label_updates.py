@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from esl.auth.current_user import CurrentUser
+from esl.gateway.commands import retry_delay
 from esl.gateway.models import LabelUpdate
 from esl.web.deps import get_business_session, get_current_user
 
@@ -22,8 +23,11 @@ class LabelUpdateSummary(BaseModel):
 
 
 def summarize(command: LabelUpdate) -> LabelUpdateSummary:
+    # retryable here is this service's decision, not the Pi's flag: it overrides the Pi
+    # for LabelHardwareError and stops after the last retry.
+    retryable = retry_delay(command) is not None if command.status == "Failed" else None
     return LabelUpdateSummary(update_id=command.update_id, action=command.action, status=command.status,
-                              failure_code=command.failure_code, retryable=command.retryable,
+                              failure_code=command.failure_code, retryable=retryable,
                               status_at=command.status_at)
 
 

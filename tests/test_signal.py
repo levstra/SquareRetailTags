@@ -19,7 +19,11 @@ def _telemetry(**fields) -> LabelTelemetry:
     [
         (None, "never_heard"),
         (_telemetry(last_seen_at=None), "never_heard"),
-        (_telemetry(last_seen_at=NOW - timedelta(hours=2), rf_power=-50), "out_of_range"),
+        # Production, Oct 2026: healthy labels go up to ~90 min between sightings, and some
+        # came back after 2-3 h. Only past 3 h is a label "not responding".
+        (_telemetry(last_seen_at=NOW - timedelta(minutes=90), rf_power=-50), "ok"),
+        (_telemetry(last_seen_at=NOW - timedelta(hours=3), rf_power=-50), "ok"),
+        (_telemetry(last_seen_at=NOW - timedelta(hours=3, minutes=1), rf_power=-50), "out_of_range"),
         (_telemetry(last_seen_at=NOW - timedelta(minutes=5), rf_power=-70), "weak"),
         (_telemetry(last_seen_at=NOW - timedelta(minutes=5), rf_power=-55), "ok"),
         (_telemetry(last_seen_at=NOW - timedelta(minutes=5), rf_power=None), "ok"),

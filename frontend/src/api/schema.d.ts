@@ -483,6 +483,11 @@ export interface components {
             /** @enum {string} */
             status: "Pending" | "Dispatched" | "Succeeded" | "Failed" | "Superseded";
             failure_code?: string | null;
+            /**
+             * @description Null unless Failed. Whether this service will retry the failure itself (a new
+             *     command at the next version), not the gateway's flag: a first LabelHardwareError
+             *     is retried once, and a retryable failure stops after its last retry.
+             */
             retryable?: boolean | null;
             /** Format: date-time */
             status_at?: string | null;

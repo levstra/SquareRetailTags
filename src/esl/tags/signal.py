@@ -16,9 +16,10 @@ SIGNAL_WEAK = "weak"
 SIGNAL_OUT_OF_RANGE = "out_of_range"
 SIGNAL_NEVER_HEARD = "never_heard"
 
-# The gateway's own health report counts labels "not seen last hour", so
-# an hour is its notion of stale rather than one invented here.
-STALE_AFTER = timedelta(hours=1)
+# Measured, not the gateway's "not seen last hour": in production (Oct 2026)
+# healthy labels go up to ~90 minutes between sightings, and some came back
+# after 2-3 hours. An hour flagged a dozen working labels at any moment.
+STALE_AFTER = timedelta(hours=3)
 
 # Observed healthy labels sit between -40 and -66 dBm. -70 is the point
 # where deliveries start needing retries, so it's the warning line, not

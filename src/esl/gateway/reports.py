@@ -61,7 +61,7 @@ async def _apply(session: AsyncSession, command: LabelUpdate, report: StatusRepo
         tag = await session.get(Tag, command.tag_id)
         if tag is not None and tag.version == command.version:
             tag.last_confirmed_at = report.status_at
-    elif report.status == "Failed" and report.retryable:
+    elif report.status == "Failed":  # enqueue_retry decides whether it's retried
         tag = await session.get(Tag, command.tag_id)
         if tag is not None:
             await enqueue_retry(session, tag, command)
