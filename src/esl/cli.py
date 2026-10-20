@@ -73,8 +73,13 @@ async def _bootstrap(env) -> int:
         database=env["DB_NAME"],
         admin_password=env["ESL_ADMIN_PASSWORD"],
         app_password=env["ESL_APP_PASSWORD"],
+        readonly_password=env.get("ESL_READONLY_PASSWORD"),
     )
     print(f"Database roles ready: esl_admin owns {env['DB_NAME']}; esl_app can log in.")
+    if env.get("ESL_READONLY_PASSWORD"):
+        print("esl_readonly can log in (read-only).")
+    else:
+        print("ESL_READONLY_PASSWORD not set: esl_readonly login skipped.")
     return 0
 
 

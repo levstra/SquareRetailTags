@@ -22,6 +22,7 @@ SUPER = admin_url("postgres")
 MASTER_URL = f"postgresql+asyncpg://esl_fake_master:fake-master@{PG}/{DB}"
 ADMIN = f"postgresql+asyncpg://esl_admin:test-admin-pw@{PG}/{DB}"
 APP = f"postgresql+asyncpg://esl_app:test-app-pw@{PG}/{DB}"
+READONLY = f"postgresql+asyncpg://esl_readonly:test-readonly-pw@{PG}/{DB}"
 
 FAKE_MASTER_SQL = """
 DO $$
@@ -34,6 +35,9 @@ BEGIN
   END IF;
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'esl_app') THEN
     GRANT esl_app TO esl_fake_master WITH ADMIN OPTION;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'esl_readonly') THEN
+    GRANT esl_readonly TO esl_fake_master WITH ADMIN OPTION;
   END IF;
 END $$
 """
@@ -49,7 +53,8 @@ async def _guard(url: str) -> None:
 
 def _bootstrap() -> None:
     asyncio.run(bootstrap_db(MASTER_URL, database=DB,
-                             admin_password="test-admin-pw", app_password="test-app-pw"))
+                             admin_password="test-admin-pw", app_password="test-app-pw",
+                             readonly_password="test-readonly-pw"))
 
 
 def test_bootstrap_then_migrate_like_production():
@@ -61,10 +66,11 @@ def test_bootstrap_then_migrate_like_production():
 
     [roles, owner] = asyncio.run(run_sql(SUPER, [
         ("select rolname, rolsuper, rolbypassrls, rolcanlogin from pg_roles "
-         "where rolname in ('esl_admin', 'esl_app') order by rolname", {}),
+         "where rolname in ('esl_admin', 'esl_app', 'esl_readonly') order by rolname", {}),
         ("select pg_get_userbyid(datdba) from pg_database where datname = :d", {"d": DB}),
     ]))
-    assert roles == [("esl_admin", False, False, True), ("esl_app", False, False, True)]
+    assert roles == [("esl_admin", False, False, True), ("esl_app", False, False, True),
+                     ("esl_readonly", False, False, True)]
     assert owner == [("esl_admin",)]
 
     migrate(ADMIN)  # migrations run as esl_admin, exactly as the Fargate migrate task does
@@ -86,10 +92,25 @@ def test_bootstrap_then_migrate_like_production():
 
     asyncio.run(_guard(APP))             # the startup guard accepts the production app login
 
+    # Production order: 0009 ran before esl_readonly existed and did nothing, so
+    # bootstrap-db adds the policies. Emulate a table that missed its policy.
+    asyncio.run(run_sql(ADMIN, [("DROP POLICY readonly_select ON tags", {})]))
+    _bootstrap()
+    [[readable], settings] = asyncio.run(run_sql(READONLY, [
+        ("select count(*) from tags", {}),
+        ("select name, setting from pg_settings where name in "
+         "('default_transaction_read_only', 'statement_timeout', 'idle_in_transaction_session_timeout') "
+         "order by name", {}),
+    ]))
+    assert readable == (2,)              # both businesses, no scope needed
+    assert settings == [("default_transaction_read_only", "on"),
+                        ("idle_in_transaction_session_timeout", "60000"),
+                        ("statement_timeout", "30000")]
+
 
 def test_cli_bootstrap_requires_env(monkeypatch, capsys):
     for name in ("MASTER_DB_USER", "MASTER_DB_PASSWORD", "DB_HOST", "DB_NAME",
-                 "ESL_ADMIN_PASSWORD", "ESL_APP_PASSWORD"):
+                 "ESL_ADMIN_PASSWORD", "ESL_APP_PASSWORD", "ESL_READONLY_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     assert cli.main(["admin", "bootstrap-db"]) == 2
     assert "MASTER_DB_USER" in capsys.readouterr().err
