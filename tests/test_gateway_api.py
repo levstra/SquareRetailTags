@@ -288,6 +288,55 @@ async def test_non_retryable_failure_is_not_retried(anon_client, admin_session):
     assert count == 1
 
 
+async def _fail_with_hardware_error(anon_client, admin_session, *, action="Update", version=1, retry_count=0):
+    failed = uuid.uuid4()
+    await admin_session.execute(text("delete from label_updates where tag_id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+    await insert_command(update_id=failed, tag_id=TAG_A, action=action, version=version, status="Dispatched",
+                         display=UPDATE_COMMAND["display"] if action == "Update" else None,
+                         product_id="VAR_A" if action == "Update" else None,
+                         seconds=30 if action == "Locate" else None, retry_count=retry_count)
+    report = {**SUCCEEDED_REPORT, "updateId": str(failed), "tagId": TAG_A, "version": version,
+              "action": action, "status": "Failed", "failureCode": "LabelHardwareError",
+              "failureMessage": "Label MCU reset or no LCM (status 0x02)", "retryable": False}
+    await _post_status(anon_client, [report])
+    return failed
+
+
+async def test_hardware_error_on_first_attempt_is_retried_once_after_a_pause(anon_client, admin_session):
+    # Production, Oct 2026: 14 of 14 labels that failed their first update with 0x02 took the next one.
+    failed = await _fail_with_hardware_error(anon_client, admin_session)
+    retry = (await admin_session.execute(text(
+        "select version, status, retry_count, not_before - now() from label_updates "
+        "where tag_id = :t and update_id <> :u"), {"t": TAG_A, "u": failed})).one()
+    assert retry[:3] == (2, "Pending", 1)
+    assert timedelta(minutes=14) < retry[3] <= timedelta(minutes=15)
+
+
+async def test_hardware_error_on_a_retry_is_left_for_a_person(anon_client, admin_session):
+    await admin_session.execute(text("update tags set version = 2 where id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+    await _fail_with_hardware_error(anon_client, admin_session, version=2, retry_count=1)
+    count = (await admin_session.execute(text("select count(*) from label_updates where tag_id = :t"), {"t": TAG_A})).scalar_one()
+    assert count == 1
+
+
+async def test_hardware_error_on_locate_is_not_retried(anon_client, admin_session):
+    await _fail_with_hardware_error(anon_client, admin_session, action="Locate", version=None)
+    count = (await admin_session.execute(text("select count(*) from label_updates where tag_id = :t"), {"t": TAG_A})).scalar_one()
+    assert count == 1
+
+
+async def test_summary_retryable_says_whether_central_will_retry(anon_client, admin_session, client):
+    first = await _fail_with_hardware_error(anon_client, admin_session)
+    assert (await client.get(f"/v1/label-updates/{first}")).json()["retryable"] is True
+
+    await admin_session.execute(text("update tags set version = 2 where id = :t"), {"t": TAG_A})
+    await admin_session.commit()
+    again = await _fail_with_hardware_error(anon_client, admin_session, version=2, retry_count=1)
+    assert (await client.get(f"/v1/label-updates/{again}")).json()["retryable"] is False
+
+
 async def test_locate_report_with_null_version(anon_client):
     update_id = await _insert_example(LOCATE_COMMAND)
     report = {"updateId": LOCATE_COMMAND["updateId"], "tagId": "840001282A7E", "version": None,

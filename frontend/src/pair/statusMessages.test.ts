@@ -35,6 +35,13 @@ describe("statusMessage", () => {
     expect(m.final).toBe(true);
   });
 
+  it("doesn't ask for a person while a hardware error is being retried", () => {
+    const m = statusMessage({ ...base, status: "Failed", failure_code: "LabelHardwareError", retryable: true });
+    expect(m.tone).toBe("warning");
+    expect(m.text).toMatch(/retrying automatically/);
+    expect(m.text).not.toMatch(/needs attention/);
+  });
+
   it("does not promise a retry for a failed locate", () => {
     const m = statusMessage({ ...base, action: "Locate", status: "Failed", failure_code: "ApTimeout", retryable: true });
     expect(m.tone).toBe("error");

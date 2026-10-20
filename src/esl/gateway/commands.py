@@ -15,6 +15,10 @@ from esl.tags.models import Tag
 from esl.tags.projection import Projection
 
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15))
+# The Pi reports LabelHardwareError as not retryable, but in production (Oct 2026)
+# all 14 labels that failed their first update with it (status 0x02) took the next
+# one. So it gets one retry, after a pause; failing again leaves it for a person.
+HARDWARE_RETRY_DELAY = timedelta(minutes=15)
 MAX_LOCATE_SECONDS = 65535
 
 
@@ -129,17 +133,33 @@ async def enqueue_locate(session: AsyncSession, tag: Tag, seconds: int = 30) -> 
     return command
 
 
-async def enqueue_retry(session: AsyncSession, tag: Tag, failed: LabelUpdate) -> LabelUpdate | None:
-    """Re-issue a retryable display failure as a new command (new updateId, next version), delayed.
+def retry_delay(failed: LabelUpdate) -> timedelta | None:
+    """How long to wait before re-issuing a failed command, or None if it won't be.
 
-    Only while `failed` is still the tag's latest version and fewer than 3 retries were made.
+    Retryable failures: up to 3 retries in a chain. LabelHardwareError: one retry, and
+    only of a command that wasn't itself a retry. Locate is never retried.
     """
-    if failed.action not in DISPLAY_ACTIONS or failed.version != tag.version or failed.retry_count >= len(RETRY_DELAYS):
+    if failed.status != "Failed" or failed.action not in DISPLAY_ACTIONS:
+        return None
+    if failed.retryable:
+        return RETRY_DELAYS[failed.retry_count] if failed.retry_count < len(RETRY_DELAYS) else None
+    if failed.failure_code == "LabelHardwareError" and failed.retry_count == 0:
+        return HARDWARE_RETRY_DELAY
+    return None
+
+
+async def enqueue_retry(session: AsyncSession, tag: Tag, failed: LabelUpdate) -> LabelUpdate | None:
+    """Re-issue a failed display command as a new command (new updateId, next version), delayed.
+
+    Only while `failed` is still the tag's latest version and `retry_delay` allows it.
+    """
+    delay = retry_delay(failed)
+    if delay is None or failed.version != tag.version:
         return None
     tag.version += 1
     command = _new(tag, action=failed.action, version=tag.version, product_id=failed.product_id,
                    display=failed.display, retry_count=failed.retry_count + 1,
-                   not_before=datetime.now(timezone.utc) + RETRY_DELAYS[failed.retry_count])
+                   not_before=datetime.now(timezone.utc) + delay)
     session.add(command)
     await session.flush()
     return command
