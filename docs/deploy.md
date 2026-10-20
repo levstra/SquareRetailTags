@@ -271,6 +271,35 @@ an `esl admin` subcommand but is run through `-Task bootstrap`. Run `push-all`
 once after replacing a Pi (existing tags only get a command when their content
 changes), and once after migrating an existing database to `0006`.
 
+## Querying the database
+
+RDS is private. `scripts/db.ps1` opens a Session Manager port forward through
+the NAT instance and connects you (needs the AWS CLI plus the
+[Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)):
+
+```powershell
+.\scripts\db.ps1          # esl_readonly: tunnel on localhost:15432, password on the clipboard
+.\scripts\db.ps1 -Psql    # same login, in psql
+.\scripts\db.ps1 -Admin   # esl_admin, for the rare write; asks you to type WRITE
+```
+
+The tunnel closes when you press Enter, leave psql, or press Ctrl+C. Point a
+client (Rider, DBeaver) at `localhost:15432`, database `esl`, SSL `require`.
+Port 15432 rather than 5433 so it can't be confused with the local docker
+Postgres.
+
+`esl_readonly` reads every business (a `readonly_select` RLS policy on every
+table, migration 0009) and has only `SELECT`. Its sessions are read-only, and
+it has a 30 s statement timeout and a 60 s idle-in-transaction timeout, so a
+heavy query or a forgotten transaction can't block the app or a migration.
+`esl_app` is no use here: without a business context it sees no rows.
+
+One-time setup on an existing database: after the release with migration
+0009 is live, `terraform apply` (creates the `esl-prod/db/esl-readonly-password`
+secret and passes it to the bootstrap task), then `.\scripts\admin.ps1 -Task bootstrap`.
+In production 0009 can't create the role (esl_admin is NOCREATEROLE) and
+does nothing; bootstrap creates the login and applies the same grants.
+
 ## Rotating secrets
 
 - Square / token key: `put-secret-value`, then `aws apprunner start-deployment`.

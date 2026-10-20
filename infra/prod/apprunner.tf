@@ -114,8 +114,8 @@ resource "aws_apprunner_service" "app" {
   }
 
   instance_configuration {
-    cpu               = "256" # 0.25 vCPU
-    memory            = "512" # 0.5 GB
+    cpu               = "1024" # 1 vCPU: a first full catalog sync parses every page on this instance
+    memory            = "2048" # 2 GB
     instance_role_arn = aws_iam_role.apprunner_instance.arn
   }
 

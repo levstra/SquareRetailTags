@@ -82,7 +82,8 @@ The Pi's own store-LAN API (how it pushes to labels) is
   migrating an existing database to `0006`, or replacing a Pi, run
   `esl admin push-all --business <id>` once.
 - A migration that creates an RLS table also adds the `admin_all` policy for
-  `esl_admin` (`tests/test_admin_policies.py` enforces it).
+  `esl_admin` and the SELECT-only `readonly_select` policy for `esl_readonly`
+  (`tests/test_admin_policies.py`, `tests/test_readonly_role.py` enforce them).
 - CI runs migrations before the new release goes live, so each migration
   keeps the running release working: add first, drop or rename in a later
   release.

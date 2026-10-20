@@ -8,6 +8,11 @@ resource "random_password" "db_app" {
   special = false
 }
 
+resource "random_password" "db_readonly" {
+  length  = 40
+  special = false
+}
+
 locals {
   db_endpoint = "${aws_db_instance.main.address}:${aws_db_instance.main.port}"
 }
@@ -30,6 +35,18 @@ resource "aws_secretsmanager_secret" "db_app_password" {
 resource "aws_secretsmanager_secret_version" "db_app_password" {
   secret_id     = aws_secretsmanager_secret.db_app_password.id
   secret_string = random_password.db_app.result
+}
+
+# esl_readonly: the operator's login for scripts/db.ps1. Read by humans and the
+# bootstrap task, never by App Runner.
+resource "aws_secretsmanager_secret" "db_readonly_password" {
+  name                    = "${local.name}/db/esl-readonly-password"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "db_readonly_password" {
+  secret_id     = aws_secretsmanager_secret.db_readonly_password.id
+  secret_string = random_password.db_readonly.result
 }
 
 # DATABASE_URL for the web app: the esl_app login (RLS enforced).

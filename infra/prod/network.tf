@@ -104,6 +104,16 @@ resource "aws_security_group" "rds" {
     protocol        = "tcp"
     security_groups = [aws_security_group.apprunner.id, aws_security_group.tasks.id]
   }
+  # Operator SQL: Session Manager port forwarding through the NAT instance
+  # (docs/deploy.md, "Querying the database"). A separate block so adding it
+  # leaves the App Runner/Fargate rule untouched.
+  ingress {
+    description     = "Operator psql via SSM port forward on the NAT"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.nat.id]
+  }
 }
 
 resource "aws_subnet" "rds_extra" {

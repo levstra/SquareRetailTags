@@ -62,6 +62,23 @@ output "nat_public_ip" {
   value = aws_eip.nat.public_ip
 }
 
+output "nat_instance_id" {
+  description = "Session Manager target for the database port forward."
+  value       = aws_instance.nat.id
+}
+
+output "rds_address" {
+  value = aws_db_instance.main.address
+}
+
+output "db_password_secrets" {
+  description = "Per-login password secrets scripts/db.ps1 reads."
+  value = {
+    esl_readonly = aws_secretsmanager_secret.db_readonly_password.name
+    esl_admin    = aws_secretsmanager_secret.db_admin_password.name
+  }
+}
+
 output "secret_arns" {
   description = "Secrets whose values a human sets with put-secret-value."
   value = {

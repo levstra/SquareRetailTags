@@ -40,6 +40,7 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
         aws_secretsmanager_secret.admin_database_url.arn,
         aws_secretsmanager_secret.db_admin_password.arn,
         aws_secretsmanager_secret.db_app_password.arn,
+        aws_secretsmanager_secret.db_readonly_password.arn,
         aws_db_instance.main.master_user_secret[0].secret_arn,
       ]
     }]
@@ -146,8 +147,9 @@ resource "aws_ecs_task_definition" "migrate" {
   }])
 }
 
-# One-time: create esl_admin / esl_app on the fresh instance. Only place the
-# RDS master secret is injected.
+# One-time: create esl_admin / esl_app / esl_readonly on the fresh instance
+# (re-run to add esl_readonly to an existing one). Only place the RDS master
+# secret is injected.
 resource "aws_ecs_task_definition" "bootstrap" {
   family                   = "${local.name}-bootstrap"
   requires_compatibilities = local.task_common.requires_compatibilities
@@ -175,6 +177,7 @@ resource "aws_ecs_task_definition" "bootstrap" {
       { name = "MASTER_DB_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
       { name = "ESL_ADMIN_PASSWORD", valueFrom = aws_secretsmanager_secret.db_admin_password.arn },
       { name = "ESL_APP_PASSWORD", valueFrom = aws_secretsmanager_secret.db_app_password.arn },
+      { name = "ESL_READONLY_PASSWORD", valueFrom = aws_secretsmanager_secret.db_readonly_password.arn },
     ]
     logConfiguration = {
       logDriver = "awslogs"
