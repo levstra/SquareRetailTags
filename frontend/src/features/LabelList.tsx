@@ -140,7 +140,7 @@ function LabelRow({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3.5">
         <div className="min-w-0 flex-1 basis-60">
           <p className="text-[15px] font-semibold text-ink">
-            {tag.name ?? <span className="text-muted">No product assigned</span>}
+            {tag.name}
             {variation && (
               <span className="font-normal text-muted"> {variation}</span>
             )}
@@ -158,17 +158,12 @@ function LabelRow({
         </div>
 
         <p className="shrink-0 basis-24 text-right font-mono text-[17px] text-ink tabular-nums">
-          {tag.variation_id ? formatPrice(tag.price) : "—"}
+          {formatPrice(tag.price)}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
           {!dimmed && <LocateButton tagId={tag.id} />}
-          <Button
-            variant={tag.variation_id ? "secondary" : "primary"}
-            onClick={() => onAssign(tag)}
-          >
-            {tag.variation_id ? "Reassign" : "Assign"}
-          </Button>
+          <Button onClick={() => onAssign(tag)}>Reassign</Button>
           <Button
             variant="quiet"
             aria-expanded={open}
@@ -201,14 +196,20 @@ function Tile({
 }: {
   label: string;
   value: number;
-  tone: "warn" | "ok" | "accent";
+  tone: "bad" | "warn" | "ok" | "accent";
 }) {
   const EDGE = {
+    bad: "bg-bad",
     warn: "bg-warn-dot",
     ok: "bg-ok",
     accent: "bg-accent",
   } as const;
-  const TEXT = { warn: "text-warn", ok: "text-ok", accent: "text-ink" } as const;
+  const TEXT = {
+    bad: "text-bad",
+    warn: "text-warn",
+    ok: "text-ok",
+    accent: "text-accent",
+  } as const;
 
   return (
     <div className="flex min-w-0 flex-1 basis-44 overflow-hidden rounded-xl border border-line bg-surface">
@@ -243,6 +244,8 @@ export function LabelList({
     const q = search.trim().toLowerCase();
 
     const matches = tags.filter((t) => {
+      // Unassigned labels drop off this list; Pair tags finds them again on a scan.
+      if (!t.variation_id) return false;
       if (store && t.store_id !== store) return false;
       if (!q) return true;
       return (
@@ -317,8 +320,8 @@ export function LabelList({
       </div>
 
       <div className="mb-5 flex flex-wrap gap-2.5">
-        <Tile label="Need attention" value={counts.attention} tone="warn" />
-        <Tile label="Weak signal" value={counts.watch} tone="accent" />
+        <Tile label="Need attention" value={counts.attention} tone="bad" />
+        <Tile label="Weak signal" value={counts.watch} tone="warn" />
         <Tile label="Working normally" value={counts.working} tone="ok" />
         <Tile label="Labels in total" value={counts.total} tone="accent" />
       </div>
