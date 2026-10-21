@@ -34,11 +34,12 @@ Call the API through the typed client in `src/api/client.ts`
 
 - Function components with hooks. No class components.
 - Server state lives in TanStack Query, not `useState` or context.
-- Two views. **Labels** is the landing view: tags needing a person (never
-  heard, not responding, failed update, low battery, weak signal; see
-  `lib/format.ts::tagStatus`) come first, worst first, then the rest;
-  battery ascending within each group, because the recurring task is
-  "which tags need batteries". **Products** is the item-first workflow:
+- Two views. **Labels** is the landing view, in three groups from
+  `lib/format.ts::tagStatus`: tags needing a person (never heard, not
+  responding, failed update, low battery) first, worst first; then weak
+  signal (still taking updates, so not "attention"), weakest first; then the
+  rest. Battery ascending breaks ties, because the recurring task is "which
+  tags need batteries". **Products** is the item-first workflow:
   browse catalog items, open one to see and manage its labels.
 - Colors come only from the theme tokens in `src/index.css` (`text-ink`,
   `bg-surface`, `text-ok`/`warn`/`bad`, ...), never raw palette classes like

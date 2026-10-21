@@ -238,7 +238,7 @@ export function LabelList({
 
   const stores = storeData ?? [];
 
-  const { attention, working, counts } = useMemo(() => {
+  const { attention, watch, working, counts } = useMemo(() => {
     const tags = data ?? [];
     const q = search.trim().toLowerCase();
 
@@ -259,16 +259,31 @@ export function LabelList({
     const byBattery = (a: Tag, b: Tag) =>
       (a.battery_volts ?? Infinity) - (b.battery_volts ?? Infinity);
 
-    const needs = matches
-      .filter((t) => tagStatus(t).needsAttention)
-      .sort((a, b) => tagStatus(a).rank - tagStatus(b).rank || byBattery(a, b));
+    const inGroup = (group: ReturnType<typeof tagStatus>["group"]) =>
+      matches.filter((t) => tagStatus(t).group === group);
 
-    const fine = matches.filter((t) => !tagStatus(t).needsAttention).sort(byBattery);
+    const needs = inGroup("attention").sort(
+      (a, b) => tagStatus(a).rank - tagStatus(b).rank || byBattery(a, b),
+    );
+
+    // Weakest first: the ones closest to dropping off, and the ones that say
+    // where an access point would help.
+    const weak = inGroup("watch").sort(
+      (a, b) => (a.rf_power ?? 0) - (b.rf_power ?? 0) || byBattery(a, b),
+    );
+
+    const fine = inGroup("ok").sort(byBattery);
 
     return {
       attention: needs,
+      watch: weak,
       working: fine,
-      counts: { attention: needs.length, working: fine.length, total: matches.length },
+      counts: {
+        attention: needs.length,
+        watch: weak.length,
+        working: fine.length,
+        total: matches.length,
+      },
     };
   }, [data, search, store]);
 
@@ -303,6 +318,7 @@ export function LabelList({
 
       <div className="mb-5 flex flex-wrap gap-2.5">
         <Tile label="Need attention" value={counts.attention} tone="warn" />
+        <Tile label="Weak signal" value={counts.watch} tone="accent" />
         <Tile label="Working normally" value={counts.working} tone="ok" />
         <Tile label="Labels in total" value={counts.total} tone="accent" />
       </div>
@@ -348,6 +364,22 @@ export function LabelList({
           </div>
           <ul className="mb-9 flex list-none flex-col gap-2.5 p-0">
             {attention.map((tag) => (
+              <LabelRow key={tag.id} tag={tag} onAssign={onAssign} />
+            ))}
+          </ul>
+        </>
+      )}
+
+      {watch.length > 0 && (
+        <>
+          <div className="mb-3 flex items-center gap-2.5">
+            <h2 className="text-xs font-bold tracking-wider text-muted uppercase">
+              Weak signal · still updating
+            </h2>
+            <Count tone="warn">{watch.length}</Count>
+          </div>
+          <ul className="mb-9 flex list-none flex-col gap-2.5 p-0">
+            {watch.map((tag) => (
               <LabelRow key={tag.id} tag={tag} onAssign={onAssign} />
             ))}
           </ul>

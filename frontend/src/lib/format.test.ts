@@ -33,12 +33,12 @@ describe("formatPrice", () => {
 
 describe("tagStatus", () => {
   it("is working when heard, charged and delivered", () => {
-    expect(tagStatus(tag({ latest_update: update("Succeeded") }))).toMatchObject({ key: "ok", needsAttention: false });
+    expect(tagStatus(tag({ latest_update: update("Succeeded") }))).toMatchObject({ key: "ok", group: "ok" });
   });
 
   it("flags a failed delivery, naming the Pi's failure code", () => {
     const status = tagStatus(tag({ latest_update: update("Failed", "LabelNoResponse") }));
-    expect(status).toMatchObject({ key: "update_failed", tone: "bad", needsAttention: true });
+    expect(status).toMatchObject({ key: "update_failed", tone: "bad", group: "attention" });
     expect(status.detail).toContain("LabelNoResponse");
   });
 
@@ -50,10 +50,27 @@ describe("tagStatus", () => {
     expect(tagStatus(tag({ signal: "weak" })).rank).toBeGreaterThan(failed);
   });
 
+  it("puts weak signal in its own group, not attention, while updates land", () => {
+    const status = tagStatus(tag({ signal: "weak", rf_power: -74, latest_update: update("Succeeded") }));
+    expect(status).toMatchObject({ key: "weak", group: "watch" });
+    expect(status.detail).toContain("-74 dBm");
+  });
+
+  it("still flags a weak-signal tag whose update failed or whose battery is low", () => {
+    expect(tagStatus(tag({ signal: "weak", latest_update: update("Failed") }))).toMatchObject({
+      key: "update_failed",
+      group: "attention",
+    });
+    expect(tagStatus(tag({ signal: "weak", low_battery: true }))).toMatchObject({
+      key: "low_battery",
+      group: "attention",
+    });
+  });
+
   it("mentions an update still on its way without raising the alarm", () => {
     for (const s of ["Pending", "Dispatched"] as const) {
       const status = tagStatus(tag({ latest_update: update(s) }));
-      expect(status).toMatchObject({ key: "ok", needsAttention: false });
+      expect(status).toMatchObject({ key: "ok", group: "ok" });
       expect(status.detail).toContain("update sending");
     }
   });
