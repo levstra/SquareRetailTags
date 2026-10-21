@@ -76,6 +76,19 @@ async def test_failed_sync_keeps_the_cursor(fake_square, admin_session):
     assert await _cursor(admin_session, BUSINESS_A) == "2026-01-01T00:00:00Z"
 
 
+async def test_unnamed_item_syncs_with_empty_name(fake_square, admin_session):
+    # Square allows an item with no name; it must not fail (and stall) the whole sync.
+    unnamed = square_item("ITEM_NONAME", "", [square_variation("VAR_NONAME", "Regular", 700)])
+    del unnamed["item_data"]["name"]
+    fake_square.catalog.objects = [unnamed]
+    await _sync_a()
+    name = (await admin_session.execute(
+        text("select name from catalog_items where id = 'ITEM_NONAME'")
+    )).scalar_one()
+    assert name == ""
+    assert await _cursor(admin_session, BUSINESS_A) == LATEST
+
+
 async def test_sync_rehashes_only_this_business_tags(fake_square, admin_session):
     fake_square.catalog.objects = [
         square_item("ITEM_A", "Item A", [square_variation("VAR_A", "Regular", 1500, sku="SKU-A")])]

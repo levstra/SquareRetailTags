@@ -55,7 +55,9 @@ export type TagStatus = {
   tone: Tone;
   /** The specifics behind the label — volts, dBm, how long ago. */
   detail: string;
-  needsAttention: boolean;
+  /** Which section of the Labels view the tag belongs in. `watch` is working
+   * (its updates are landing) but worth keeping an eye on: weak signal. */
+  group: "attention" | "watch" | "ok";
   /** Worst first, for sorting. */
   rank: number;
 };
@@ -87,7 +89,7 @@ export function tagStatus(tag: Tag): TagStatus {
       label: "Never seen",
       tone: "idle",
       detail: "no access point has ever heard this tag — the ID may be wrong",
-      needsAttention: true,
+      group: "attention",
       rank: 0,
     };
   }
@@ -98,7 +100,7 @@ export function tagStatus(tag: Tag): TagStatus {
       label: "Not responding",
       tone: "bad",
       detail: and(heard, tag.low_battery ? `low battery, ${battery}` : battery),
-      needsAttention: true,
+      group: "attention",
       rank: 1,
     };
   }
@@ -114,7 +116,7 @@ export function tagStatus(tag: Tag): TagStatus {
         update.failure_code ? `the gateway reported ${update.failure_code}` : "the gateway couldn't apply it",
         update.retryable === false ? "needs a person" : null,
       ),
-      needsAttention: true,
+      group: "attention",
       rank: 2,
     };
   }
@@ -125,18 +127,20 @@ export function tagStatus(tag: Tag): TagStatus {
       label: "Low battery",
       tone: "warn",
       detail: and(battery ? `${battery} · swap it soon` : "swap it soon", power, sending),
-      needsAttention: true,
+      group: "attention",
       rank: 3,
     };
   }
 
+  // Not a problem on its own: a failed update would have returned above, so a
+  // weak-signal tag is still taking its updates. Its own section, not attention.
   if (tag.signal === "weak") {
     return {
       key: "weak",
       label: "Weak signal",
       tone: "warn",
       detail: and(power, battery, heard, sending),
-      needsAttention: true,
+      group: "watch",
       rank: 4,
     };
   }
@@ -146,7 +150,7 @@ export function tagStatus(tag: Tag): TagStatus {
     label: "Working",
     tone: "ok",
     detail: and(power, battery, sending),
-    needsAttention: false,
+    group: "ok",
     rank: 5,
   };
 }

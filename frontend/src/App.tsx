@@ -3,12 +3,13 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { api, ApiError, clearRedirectMarker } from "./api/client";
 import { signOut } from "./auth/userManager";
-import { AssignModal, type AssignTarget } from "./features/AssignModal";
+import { AssignModal } from "./features/AssignModal";
 import { ItemDetailModal } from "./features/ItemDetailModal";
 import { LabelList } from "./features/LabelList";
 import { ProductList } from "./features/ProductList";
+import { ReassignModal } from "./features/ReassignModal";
 import { StoresModal } from "./features/StoresModal";
-import type { Variation } from "./lib/queries";
+import type { Tag, Variation } from "./lib/queries";
 import { navigate } from "./router";
 import { SquareSettings } from "./square/SquareSettings";
 import { squareConnectionQuery } from "./square/queries";
@@ -76,7 +77,8 @@ const squareResult = returnedFromSquare
 
 export default function App() {
   const [view, setView] = useState<View>(returnedFromSquare ? "square" : "labels");
-  const [assigning, setAssigning] = useState<AssignTarget | "new" | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [reassigning, setReassigning] = useState<Tag | null>(null);
   const [selected, setSelected] = useState<Variation | null>(null);
   const [storesOpen, setStoresOpen] = useState(false);
 
@@ -191,14 +193,8 @@ export default function App() {
           <ProductList onSelect={setSelected} />
         ) : (
           <LabelList
-            onAddTag={() => setAssigning("new")}
-            onAssign={(tag) =>
-              setAssigning({
-                tagId: tag.id,
-                storeId: tag.store_id ?? undefined,
-                variationId: tag.variation_id,
-              })
-            }
+            onAddTag={() => setAdding(true)}
+            onAssign={setReassigning}
           />
         )}
       </main>
@@ -207,11 +203,10 @@ export default function App() {
         <ItemDetailModal variation={selected} onClose={() => setSelected(null)} />
       )}
 
-      {assigning !== null && (
-        <AssignModal
-          initial={assigning === "new" ? undefined : assigning}
-          onClose={() => setAssigning(null)}
-        />
+      {adding && <AssignModal onClose={() => setAdding(false)} />}
+
+      {reassigning && (
+        <ReassignModal tag={reassigning} onClose={() => setReassigning(null)} />
       )}
 
       {storesOpen && (

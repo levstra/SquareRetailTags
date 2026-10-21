@@ -102,13 +102,15 @@ async def sync_catalog(session: AsyncSession, business_id: uuid.UUID) -> dict:
             continue
 
         updated_at = _parse_dt(obj.updated_at)
+        # Square allows an unnamed item; a null here would fail the sync and stall the cursor.
+        name = obj.item_data.name or ""
 
         await session.execute(
             insert(CatalogItem)
-            .values(business_id=business_id, id=obj.id, name=obj.item_data.name, updated_at=updated_at)
+            .values(business_id=business_id, id=obj.id, name=name, updated_at=updated_at)
             .on_conflict_do_update(
                 index_elements=["business_id", "id"],
-                set_={"name": obj.item_data.name, "updated_at": updated_at},
+                set_={"name": name, "updated_at": updated_at},
             )
         )
         items_upserted += 1

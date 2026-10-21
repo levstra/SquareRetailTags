@@ -11,23 +11,11 @@ import {
 } from "../lib/queries";
 import { Button, Field, Modal, Select, TextInput } from "../ui";
 
-export type AssignTarget = {
-  tagId: string;
-  storeId?: string;
-  variationId?: string | null;
-};
-
-export function AssignModal({
-  initial,
-  onClose,
-}: {
-  initial?: AssignTarget;
-  onClose: () => void;
-}) {
+export function AssignModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [tagId, setTagId] = useState(initial?.tagId ?? "");
-  const [storeId, setStoreId] = useState(initial?.storeId ?? "");
-  const [variationId, setVariationId] = useState(initial?.variationId ?? "");
+  const [tagId, setTagId] = useState("");
+  const [storeId, setStoreId] = useState("");
+  const [variationId, setVariationId] = useState("");
   const [error, setError] = useState("");
 
   const { data: varData } = useVariations();
@@ -68,7 +56,7 @@ export function AssignModal({
 
   return (
     <Modal
-      title={initial?.tagId ? "Change what this label shows" : "Add a label"}
+      title="Add a label"
       onClose={onClose}
       footer={
         <>
@@ -92,8 +80,7 @@ export function AssignModal({
             className="font-mono uppercase"
             value={tagId}
             maxLength={12}
-            readOnly={!!initial?.tagId}
-            autoFocus={!initial?.tagId}
+            autoFocus
             onChange={(e) => setTagId(e.target.value.toUpperCase())}
           />
         </Field>
@@ -101,7 +88,6 @@ export function AssignModal({
         <Field label="Store">
           <Select
             value={effectiveStoreId}
-            disabled={!!initial?.storeId}
             onChange={(e) => setStoreId(e.target.value)}
           >
             <option value="">— Select a store —</option>
