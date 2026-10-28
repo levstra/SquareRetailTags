@@ -23,6 +23,23 @@ resource "aws_cognito_user_pool" "main" {
       priority = 1
     }
   }
+
+  # Cognito's shared sender until cognito_email_via_ses: the SES account starts
+  # in the sandbox and can't deliver to unverified addresses (docs/deploy.md
+  # "Email"). Rollback is setting it back to false and applying.
+  email_configuration {
+    email_sending_account  = var.cognito_email_via_ses ? "DEVELOPER" : "COGNITO_DEFAULT"
+    source_arn             = var.cognito_email_via_ses ? aws_sesv2_email_identity.main[0].arn : null
+    from_email_address     = var.cognito_email_via_ses ? "Levstra <no-reply@${var.hosted_zone_name}>" : null
+    reply_to_email_address = var.cognito_email_via_ses ? "levstra@${var.hosted_zone_name}" : null
+  }
+
+  dynamic "lambda_config" {
+    for_each = var.cognito_email_via_ses ? [1] : []
+    content {
+      custom_message = aws_lambda_function.cognito_emails[0].arn
+    }
+  }
 }
 
 resource "aws_cognito_user_pool_client" "web" {
