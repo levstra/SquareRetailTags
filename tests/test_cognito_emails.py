@@ -85,3 +85,8 @@ def test_wordmark_png_matches_img_tag():
     assert height == 56
     html = ce.render("CustomMessage_ForgotPassword", "{####}", None, "https://app.levstra.com")[1]
     assert f'width="{width // 2}"' in html
+
+
+def test_invite_without_username_parameter_keeps_placeholder():
+    html = ce.handler(event("CustomMessage_AdminCreateUser", username=None), None)["response"]["emailMessage"]
+    assert "{username}" in html and "{####}" in html

@@ -167,7 +167,7 @@ def handler(event: dict, context: object) -> dict:
     rendered = render(
         trigger,
         request.get("codeParameter", "{####}"),
-        request.get("usernameParameter"),
+        request.get("usernameParameter") or "{username}",
         APP_URL,
     )
     if rendered is not None:
