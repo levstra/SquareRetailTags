@@ -2,8 +2,39 @@ import { useEffect, type ReactNode } from "react";
 import { hasAuthParams, useAuth } from "react-oidc-context";
 import { isSigningOut } from "./userManager";
 
+// A callback whose state we never stored (stale tab, back button, a different
+// browser) can't be completed, but the Cognito session it came from is still
+// good: start sign-in again once and Cognito redirects straight back.
+const RESTARTED_KEY = "esl.signin-restarted";
+
+function restartedOnce(): boolean {
+  try {
+    if (sessionStorage.getItem(RESTARTED_KEY)) return true;
+    sessionStorage.setItem(RESTARTED_KEY, "1");
+  } catch {
+    return true; // Can't remember the attempt, so don't risk a redirect loop.
+  }
+  return false;
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();
+
+  useEffect(() => {
+    if (auth.isAuthenticated) {
+      try {
+        sessionStorage.removeItem(RESTARTED_KEY);
+      } catch {
+        // Nothing to clear.
+      }
+    }
+  }, [auth.isAuthenticated]);
+
+  useEffect(() => {
+    if (auth.error?.message === "No matching state found in storage" && !restartedOnce()) {
+      void auth.signinRedirect();
+    }
+  }, [auth]);
 
   useEffect(() => {
     if (isSigningOut()) return;
