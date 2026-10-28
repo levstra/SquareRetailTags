@@ -1,9 +1,11 @@
 # The bare domain (levstra.com). Cognito refuses a custom domain whose parent
 # has no A record, so login.<zone> needs this to exist.
 #
-# Today every request is redirected to the app. For a landing page: upload it
-# to aws_s3_bucket.site (index.html at the root) and remove the
-# function_association below. The redirect is a 302 so browsers don't cache it.
+# Today every request is redirected to the app, except /email/* (images for
+# Cognito email, email.tf), which is served from aws_s3_bucket.site. For a
+# landing page: upload it to the bucket (index.html at the root) and remove the
+# default behavior's function_association. The redirect is a 302 so browsers
+# don't cache it.
 
 resource "aws_acm_certificate" "edge" {
   count                     = var.deploy_service ? 1 : 0
@@ -120,6 +122,16 @@ resource "aws_cloudfront_distribution" "site" {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.apex_redirect[0].arn
     }
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/email/*"
+    target_origin_id       = "site"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+    compress               = true
   }
 
   restrictions {
