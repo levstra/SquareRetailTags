@@ -96,7 +96,6 @@ export function PairPage() {
   // pairState treats "no matches" like "nothing scanned"; the page remembers the code to say so.
   const [notFound, setNotFound] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(true);
-  const [cameraFailed, setCameraFailed] = useState(false);
   const [notice, setNotice] = useState<{ tone: Tone; text: string } | null>(null);
   const [flash, setFlash] = useState(false);
   const [lastPair, setLastPair] = useState<LastPair | null>(null);
@@ -214,8 +213,8 @@ export function PairPage() {
     }
   }, [storeId, loadTag, loadProduct, fail]);
 
-  // The handheld scanner works whenever the camera doesn't: off, or failed to start.
-  useWedge(!cameraOn || cameraFailed, handleScan);
+  // A handheld (USB or Bluetooth) scanner works all the time, camera on or off.
+  useWedge(handleScan);
 
   const pair = useMutation({
     mutationFn: async ({ tag, product, storeId }: PairRequest) => {
@@ -316,12 +315,9 @@ export function PairPage() {
           <h1 className="text-2xl font-bold tracking-tight text-ink">Pair tags</h1>
           <Button
             variant="quiet"
-            onClick={() => {
-              setCameraOn((on) => !on);
-              setCameraFailed(false); // turning the camera back on retries it
-            }}
+            onClick={() => setCameraOn((on) => !on)}
           >
-            {cameraOn ? "Use handheld scanner" : "Use camera"}
+            {cameraOn ? "Turn camera off" : "Turn camera on"}
           </Button>
         </div>
 
@@ -332,9 +328,9 @@ export function PairPage() {
           <p className="rounded-lg bg-warn-tint p-3 text-sm text-warn">You don't have access to any store.</p>
         )}
 
-        {cameraOn && storeId && <CameraScanner onScan={handleScan} onError={() => setCameraFailed(true)} />}
+        {cameraOn && storeId && <CameraScanner onScan={handleScan} />}
         {!cameraOn && (
-          <p className="rounded-lg bg-surface-2 p-3 text-sm text-muted">Ready for the handheld scanner.</p>
+          <p className="rounded-lg bg-surface-2 p-3 text-sm text-muted">Camera off. The handheld scanner still works.</p>
         )}
 
         <form
