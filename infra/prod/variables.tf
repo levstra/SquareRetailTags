@@ -18,6 +18,12 @@ variable "app_subdomain" {
   default = "app"
 }
 
+variable "login_subdomain" {
+  type        = string
+  default     = "login"
+  description = "Cognito sign-in host, e.g. login.example.com. Created with deploy_service."
+}
+
 variable "cognito_domain_prefix" {
   type        = string
   description = "Globally unique prefix for <prefix>.auth.<region>.amazoncognito.com."

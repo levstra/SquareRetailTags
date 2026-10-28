@@ -244,6 +244,33 @@ aws apprunner start-deployment --service-arn <apprunner_service_arn>
 Schema changes are not rolled back automatically; a release that needs a
 schema rollback needs a new forward migration.
 
+## Sign-in domain and the bare domain [CHANGES AWS] [CHANGES DNS] [CHANGES GITHUB]
+
+With `deploy_service = true`, Terraform puts Cognito sign-in on
+`login.levstra.com` (`login_subdomain`) and serves `levstra.com` from
+CloudFront (`site.tf`). Cognito refuses a custom domain whose parent has no A
+record, so the bare domain has to exist first; for now it 302-redirects to the
+app. The `amazoncognito.com` prefix domain stays as a fallback.
+
+Moving an existing deployment over:
+
+```powershell
+terraform -chdir=infra/prod apply -var-file=prod.tfvars
+curl.exe -s -o NUL -w "%{http_code}`n" https://levstra.com/          # 302
+curl.exe -s -o NUL -w "%{http_code}`n" "https://login.levstra.com/oauth2/authorize?client_id=$(terraform -chdir=infra/prod output -raw cognito_app_client_id)&response_type=code&scope=openid&redirect_uri=https://app.levstra.com/auth/callback"   # 200 or 302
+gh variable set VITE_COGNITO_DOMAIN --env production --body (terraform -chdir=infra/prod output -raw cognito_domain_url)
+```
+
+The Cognito domain can take up to an hour to answer after the apply. Change the
+GitHub variable only once the second `curl` stops failing, then merge
+anything (or re-run the deploy workflow) so the frontend is rebuilt with it.
+Rolling back is setting the variable back to the prefix-domain URL and
+rebuilding.
+
+Landing page later: upload it to the `esl-prod-site-<account>` bucket with
+`index.html` at the root, and delete the `function_association` block in
+`site.tf`.
+
 ## Operator commands
 
 `scripts/admin.ps1` runs `esl admin <subcommand>` as a one-off Fargate task in
@@ -345,4 +372,5 @@ us-west-2, approximate, monthly.
 | Route 53 hosted zone | $0.5 |
 | CloudWatch logs/alarms, ECR storage, S3 state, SNS, Fargate one-offs | ~$1-2 |
 | Cognito (free tier), S3 gateway endpoint (free) | $0 |
+| CloudFront + S3 for `levstra.com`, ACM certificate (free tier / free) | $0 |
 | **Total** | **~$40** |

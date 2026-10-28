@@ -6,3 +6,6 @@ CLAUDE.local.md
 src/esl/web/static/
 .idea/
 *.stackdump
+
+# Claude Code personal settings
+.claude/settings.local.json
