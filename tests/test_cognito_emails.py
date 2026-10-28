@@ -74,3 +74,14 @@ def test_stdlib_only():
 def test_preview_writes_one_file_per_trigger(tmp_path):
     ce.main(["preview", str(tmp_path)])
     assert {p.stem for p in tmp_path.glob("*.html")} == set(MAPPED)
+
+
+def test_wordmark_png_matches_img_tag():
+    import struct
+
+    png = (Path(__file__).parents[1] / "infra/prod/branding/email-wordmark.png").read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    width, height = struct.unpack(">II", png[16:24])
+    assert height == 56
+    html = ce.render("CustomMessage_ForgotPassword", "{####}", None, "https://app.levstra.com")[1]
+    assert f'width="{width // 2}"' in html

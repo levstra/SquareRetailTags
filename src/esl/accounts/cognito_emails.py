@@ -21,7 +21,7 @@ log.setLevel(logging.INFO)
 APP_URL = os.environ.get("APP_URL", "https://app.levstra.com")
 WORDMARK_URL = "https://levstra.com/email/wordmark.png"
 # Half the PNG's pixel width: infra/prod/branding/email-wordmark.png is 2x.
-WORDMARK_WIDTH = 104
+WORDMARK_WIDTH = 114
 
 ACCENT = "#6d3fd4"
 TEXT = "#1c1726"
