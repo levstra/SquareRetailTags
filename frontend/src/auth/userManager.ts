@@ -1,5 +1,6 @@
 import { UserManager, WebStorageStateStore } from "oidc-client-ts";
 
+const authority = import.meta.env.VITE_COGNITO_AUTHORITY;
 const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const origin = window.location.origin;
@@ -7,7 +8,17 @@ const origin = window.location.origin;
 // Cognito hosted UI, authorization code + PKCE. Tokens never touch our backend
 // except as the bearer header on API calls.
 export const userManager = new UserManager({
-  authority: import.meta.env.VITE_COGNITO_AUTHORITY,
+  authority,
+  // Explicit rather than discovered: the discovery document may advertise the
+  // amazoncognito.com prefix domain, and sign-in should stay on our own host.
+  metadata: {
+    issuer: authority,
+    jwks_uri: `${authority}/.well-known/jwks.json`,
+    authorization_endpoint: `${cognitoDomain}/oauth2/authorize`,
+    token_endpoint: `${cognitoDomain}/oauth2/token`,
+    userinfo_endpoint: `${cognitoDomain}/oauth2/userInfo`,
+    revocation_endpoint: `${cognitoDomain}/oauth2/revoke`,
+  },
   client_id: clientId,
   redirect_uri: `${origin}/auth/callback`,
   post_logout_redirect_uri: `${origin}/`,

@@ -33,7 +33,11 @@ $clientId = Invoke-Aws cognito-idp create-user-pool-client --region $Region --us
     --explicit-auth-flows ALLOW_USER_SRP_AUTH ALLOW_REFRESH_TOKEN_AUTH `
     --query 'UserPoolClient.ClientId' --output text
 
-Invoke-Aws cognito-idp create-user-pool-domain --region $Region --user-pool-id $poolId --domain $DomainPrefix | Out-Null
+Invoke-Aws cognito-idp create-user-pool-domain --region $Region --user-pool-id $poolId --domain $DomainPrefix `
+    --managed-login-version 2 | Out-Null
+
+# Same sign-in page styling as production (infra/prod/cognito.tf).
+& (Join-Path $PSScriptRoot 'dev_cognito_branding.ps1') -UserPoolId $poolId -ClientId $clientId -Region $Region
 
 Write-Host ''
 Write-Host 'Add to .env:' -ForegroundColor Green
