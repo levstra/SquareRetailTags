@@ -16,15 +16,21 @@ resource "aws_acm_certificate" "edge" {
   }
 }
 
-resource "aws_route53_record" "edge_certificate_validation" {
-  for_each = {
+# Keyed by the domain names, which are known at plan time; the records
+# themselves aren't until the certificate exists.
+locals {
+  edge_validation = {
     for o in try(aws_acm_certificate.edge[0].domain_validation_options, []) : o.domain_name => o
   }
+}
+
+resource "aws_route53_record" "edge_certificate_validation" {
+  for_each        = var.deploy_service ? toset([var.hosted_zone_name, local.login_host]) : toset([])
   zone_id         = data.aws_route53_zone.main[0].zone_id
-  name            = each.value.resource_record_name
-  type            = each.value.resource_record_type
+  name            = local.edge_validation[each.key].resource_record_name
+  type            = local.edge_validation[each.key].resource_record_type
   ttl             = 300
-  records         = [each.value.resource_record_value]
+  records         = [local.edge_validation[each.key].resource_record_value]
   allow_overwrite = true
 }
 
