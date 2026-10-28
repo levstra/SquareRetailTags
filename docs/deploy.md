@@ -271,6 +271,120 @@ Landing page later: upload it to the `esl-prod-site-<account>` bucket with
 `index.html` at the root, and delete the `function_association` block in
 `site.tf`.
 
+## Email [CHANGES AWS] [CHANGES DNS]
+
+Cognito's emails (invites, password resets, verification and sign-in codes)
+can come from `Levstra <no-reply@levstra.com>`, Reply-To
+`levstra@levstra.com`, sent through SES with DKIM, a `mail.levstra.com` MAIL
+FROM and DMARC. The wording and layout come from the custom message Lambda,
+`src/esl/accounts/cognito_emails.py` (preview: `python -m
+esl.accounts.cognito_emails preview <dir>`). Everything is in
+`infra/prod/email.tf`. The apex TXT record and the ForwardEmail MX records
+were made by hand and are not touched.
+
+### Stage 1: SES domain, DNS, Lambda (pool unchanged)
+
+```powershell
+terraform -chdir=infra/prod plan "-var-file=prod.tfvars"    # creates only; aws_cognito_user_pool.main not listed
+terraform -chdir=infra/prod apply "-var-file=prod.tfvars"
+aws sesv2 get-email-identity --email-identity levstra.com --query '{dkim:DkimAttributes.Status,mailFrom:MailFromAttributes.MailFromDomainStatus}'
+curl.exe -sI https://levstra.com/email/wordmark.png         # 200, content-type: image/png
+curl.exe -s -o NUL -w "%{http_code}`n" https://levstra.com/  # still 302
+```
+
+DKIM and MAIL FROM can take up to an hour to show `SUCCESS`.
+
+### Stage 2: SES production access, dev test, mail-tester
+
+New SES accounts are in the sandbox: 200 emails a day, and only to verified
+addresses. Request production access in the console (SES -> Account dashboard
+-> Request production access), mail type **Transactional**, website
+`https://levstra.com`, and this use case:
+
+> Transactional email only: account invitations, password reset codes and
+> email verification codes for Levstra, an invite-only dashboard for retail
+> electronic shelf labels with a few dozen users. No marketing or bulk mail.
+> Every recipient is added deliberately by an owner or operator who invites
+> them by email address; nobody can sign themselves up. Bounces and
+> complaints are handled by the SES account-level suppression list, which is
+> enabled. Mail is signed with DKIM on levstra.com, uses a custom MAIL FROM
+> domain (mail.levstra.com) and is covered by a DMARC record.
+
+While waiting, test on the dev pool (it verifies your address in the sandbox
+first):
+
+```powershell
+.\scripts\dev_cognito_email.ps1 -UserPoolId <dev pool id> -RecipientEmail <you>
+# "Forgot password" on http://localhost:5173, and a resent invite:
+aws cognito-idp admin-create-user --user-pool-id <dev pool id> --username <you> --message-action RESEND
+.\scripts\dev_cognito_email.ps1 -UserPoolId <dev pool id> -Disable   # drill: back to Cognito's default
+aws cognito-idp describe-user-pool --user-pool-id <dev pool id> --query 'UserPool.LambdaConfig'   # no CustomMessage
+```
+
+Check in Gmail's "Show original": SPF, DKIM and DMARC `PASS`, `mailed-by:
+mail.levstra.com`, `signed-by: levstra.com`. Check Apple Mail too, in light
+and dark mode.
+
+**Deliverability check (mail-tester).** Do this before stage 3. Re-enable the
+dev pool, go to https://www.mail-tester.com, verify the address it shows in
+SES the same way (`aws sesv2 create-email-identity --email-identity <that
+address>`), and send a forgot-password email to it. Record the score here:
+
+| Date | Score | Notes |
+|---|---|---|
+| | | |
+
+**If the score is below 9/10, or the report flags the missing plain-text part
+(`MIME_HTML_ONLY` or similar), open a follow-up to add a plain-text
+version.** Cognito's custom message trigger can only send HTML, so that
+follow-up means a Cognito *custom email sender* Lambda (approach C in
+`docs/superpowers/specs/2026-10-28-cognito-email-design.md`) and needs its own
+spec.
+
+### Stage 3: switch the production pool (after SES approval)
+
+Set `cognito_email_via_ses = true` in `prod.tfvars`, then:
+
+```powershell
+terraform -chdir=infra/prod plan "-var-file=prod.tfvars"    # aws_cognito_user_pool.main "updated in-place", never "must be replaced"
+terraform -chdir=infra/prod apply "-var-file=prod.tfvars"
+```
+
+Then use "Forgot password" on https://app.levstra.com for your own account:
+the email comes from `no-reply@levstra.com`, styled, with SPF/DKIM/DMARC
+`PASS`.
+
+### DMARC, about two weeks later
+
+The DMARC reports go to `levstra@levstra.com`. When they show only aligned
+mail from SES, set `dmarc_policy = "quarantine"` in `prod.tfvars` and apply.
+
+### Rollback
+
+Set `cognito_email_via_ses = false` and apply: the pool goes back to
+Cognito's default sender and wording. The SES identity, DNS records and
+Lambda stay and do nothing. Confirm the trigger is gone:
+
+```powershell
+aws cognito-idp describe-user-pool --user-pool-id (terraform -chdir=infra/prod output -raw cognito_user_pool_id) --query 'UserPool.LambdaConfig'
+```
+
+If `CustomMessage` is still set, Terraform didn't clear it. Clear it with
+`aws cognito-idp update-user-pool`, passing the pool's other settings back
+unchanged (as `scripts/dev_cognito_email.ps1 -Disable` does), and note it
+here.
+
+If the Lambda fails, Cognito sends nothing and the invite or reset fails;
+the `esl-prod-cognito-emails-errors` alarm emails the alarm address.
+
+### Before anything else sends as @levstra.com (invoicing)
+
+1. Add the new sender's SPF include or DKIM records in Terraform. Keep a
+   single SPF record per name.
+2. Send a test to mail-tester and confirm SPF, DKIM and DMARC pass.
+3. Only then send real mail. With DMARC at `quarantine`, unauthenticated mail
+   from `levstra.com` goes to spam.
+
 ## Operator commands
 
 `scripts/admin.ps1` runs `esl admin <subcommand>` as a one-off Fargate task in
@@ -373,4 +487,5 @@ us-west-2, approximate, monthly.
 | CloudWatch logs/alarms, ECR storage, S3 state, SNS, Fargate one-offs | ~$1-2 |
 | Cognito (free tier), S3 gateway endpoint (free) | $0 |
 | CloudFront + S3 for `levstra.com`, ACM certificate (free tier / free) | $0 |
+| SES, $0.10 per 1,000 emails; email Lambda (free tier) | ~$0 |
 | **Total** | **~$40** |
