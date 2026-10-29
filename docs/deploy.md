@@ -296,10 +296,11 @@ DKIM and MAIL FROM can take up to an hour to show `SUCCESS`.
 
 ### Stage 2: SES production access, dev test, mail-tester
 
-New SES accounts are in the sandbox: 200 emails a day, and only to verified
-addresses. Request production access in the console (SES -> Account dashboard
+Production access was granted on 2026-10-28 (50,000 emails a day, 14 a
+second), so SES is out of the sandbox and recipients need no verification. A
+new account would need to request it in the console (SES -> Account dashboard
 -> Request production access), mail type **Transactional**, website
-`https://levstra.com`, and this use case:
+`https://levstra.com`, with this use case:
 
 > Transactional email only: account invitations, password reset codes and
 > email verification codes for Levstra, an invite-only dashboard for retail
@@ -310,36 +311,39 @@ addresses. Request production access in the console (SES -> Account dashboard
 > enabled. Mail is signed with DKIM on levstra.com, uses a custom MAIL FROM
 > domain (mail.levstra.com) and is covered by a DMARC record.
 
-While waiting, test on the dev pool (it verifies your address in the sandbox
-first):
+Test on the dev pool. Its users are in the dev pool, not production: check
+with `aws cognito-idp list-users --user-pool-id <dev pool id>`.
 
 ```powershell
 .\scripts\dev_cognito_email.ps1 -UserPoolId <dev pool id> -RecipientEmail <you>
-# "Forgot password" on http://localhost:5173, and a resent invite:
-aws cognito-idp admin-create-user --user-pool-id <dev pool id> --username <you> --message-action RESEND
+aws cognito-idp forgot-password --client-id <dev client id> --username <existing dev user>
+aws cognito-idp admin-create-user --user-pool-id <dev pool id> --username <you>   # an invite
+aws cognito-idp admin-delete-user --user-pool-id <dev pool id> --username <you>   # afterwards: the invite held a live temporary password
 .\scripts\dev_cognito_email.ps1 -UserPoolId <dev pool id> -Disable   # drill: back to Cognito's default
 aws cognito-idp describe-user-pool --user-pool-id <dev pool id> --query 'UserPool.LambdaConfig'   # no CustomMessage
 ```
 
 Check in Gmail's "Show original": SPF, DKIM and DMARC `PASS`, `mailed-by:
-mail.levstra.com`, `signed-by: levstra.com`. Check Apple Mail too, in light
-and dark mode.
+mail.levstra.com`, `signed-by: levstra.com`, and the invite's Email row
+shows the invited address (Cognito fills `{username}` with the email).
 
-**Deliverability check (mail-tester).** Do this before stage 3. Re-enable the
-dev pool, go to https://www.mail-tester.com, verify the address it shows in
-SES the same way (`aws sesv2 create-email-identity --email-identity <that
-address>`), and send a forgot-password email to it. Record the score here:
+**Deliverability check (mail-tester).** Go to https://www.mail-tester.com
+(not the paid inbox-placement services: those want a send to many seed
+inboxes, and a Cognito invite to each would hand out live temporary
+passwords), and invite the address it shows on the dev pool. Delete that
+user afterwards.
 
 | Date | Score | Notes |
 |---|---|---|
-| | | |
+| 2026-10-29 | 9.3/10 | Dev pool invite. SPF, DKIM (levstra.com) and DMARC pass. Lost points: no plain-text part (`MIME_HTML_ONLY`, `MPART_ALT_DIFF`, about 0.7); `WEIRD_PORT` from the dev pool's `localhost:5173` link, not in production. No List-Unsubscribe: correct for transactional mail. |
 
-**If the score is below 9/10, or the report flags the missing plain-text part
-(`MIME_HTML_ONLY` or similar), open a follow-up to add a plain-text
-version.** Cognito's custom message trigger can only send HTML, so that
-follow-up means a Cognito *custom email sender* Lambda (approach C in
-`docs/superpowers/specs/2026-10-28-cognito-email-design.md`) and needs its own
-spec.
+**Plain text: decided against for now (2026-10-29).** The missing plain-text
+part costs about 0.7 points, and everything that matters for inbox placement
+passes. Cognito's custom message trigger can only send HTML, so adding one
+means a Cognito *custom email sender* Lambda (approach C in
+`docs/superpowers/specs/2026-10-28-cognito-email-design.md`): a KMS key, the
+AWS Encryption SDK, and sending through SES ourselves. Revisit only if
+emails start landing in spam; it would need its own spec.
 
 ### Stage 3: switch the production pool (after SES approval)
 
