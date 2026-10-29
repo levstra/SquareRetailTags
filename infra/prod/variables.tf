@@ -75,3 +75,19 @@ variable "vpc_cidr" {
   type    = string
   default = "10.40.0.0/16"
 }
+
+variable "cognito_email_via_ses" {
+  type        = bool
+  default     = false
+  description = "Send Cognito email from no-reply@<zone> through SES with the custom message Lambda. Needs SES production access first; see docs/deploy.md \"Email\"."
+}
+
+variable "dmarc_policy" {
+  type        = string
+  default     = "none"
+  description = "DMARC p= for the zone. Move to quarantine after clean reports; see docs/deploy.md \"Email\"."
+  validation {
+    condition     = contains(["none", "quarantine", "reject"], var.dmarc_policy)
+    error_message = "dmarc_policy must be none, quarantine or reject."
+  }
+}

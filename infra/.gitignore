@@ -5,3 +5,4 @@
 crash.log
 prod.tfvars
 backend.hcl
+prod/.build/
