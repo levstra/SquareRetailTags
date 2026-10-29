@@ -26,6 +26,10 @@ export const userManager = new UserManager({
   scope: "openid email",
   automaticSilentRenew: true,
   userStore: new WebStorageStateStore({ store: window.localStorage }),
+  // The default (sessionStorage) is per tab. Phones often land the Cognito
+  // redirect in a different tab than the one that started sign-in, and the
+  // callback then fails with "No matching state found in storage".
+  stateStore: new WebStorageStateStore({ store: window.localStorage }),
 });
 
 // Cognito's logout endpoint isn't in its OIDC discovery document.
