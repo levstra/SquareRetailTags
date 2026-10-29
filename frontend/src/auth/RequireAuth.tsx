@@ -6,6 +6,15 @@ import { isSigningOut } from "./userManager";
 // browser) can't be completed, but the Cognito session it came from is still
 // good: start sign-in again once and Cognito redirects straight back.
 const RESTARTED_KEY = "esl.signin-restarted";
+const STATE_MISSING = "No matching state found in storage";
+
+function hasRestarted(): boolean {
+  try {
+    return sessionStorage.getItem(RESTARTED_KEY) !== null;
+  } catch {
+    return true;
+  }
+}
 
 function restartedOnce(): boolean {
   try {
@@ -31,7 +40,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }, [auth.isAuthenticated]);
 
   useEffect(() => {
-    if (auth.error?.message === "No matching state found in storage" && !restartedOnce()) {
+    if (auth.error?.message === STATE_MISSING && !restartedOnce()) {
       void auth.signinRedirect();
     }
   }, [auth]);
@@ -43,10 +52,20 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     }
   }, [auth]);
 
+  // The error stays set while the restart navigates away; don't flash it.
+  const staleCallback = auth.error?.message === STATE_MISSING;
+  if (auth.error && (auth.activeNavigator || (staleCallback && !hasRestarted()))) {
+    return <div className="flex min-h-screen items-center justify-center text-sm text-muted">Signing in…</div>;
+  }
   if (auth.error) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm text-bad">Sign-in failed: {auth.error.message}</p>
+        <p className="text-sm text-ink">
+          {staleCallback
+            ? "That sign-in page had expired. Tap Try again to sign in."
+            : "We couldn't sign you in. Tap Try again, and if it keeps happening, send us a screenshot of this page."}
+        </p>
+        <p className="text-xs text-muted">{auth.error.message}</p>
         <button
           type="button"
           className="min-h-10 rounded-lg border border-line bg-surface px-3.5 text-sm text-muted hover:text-ink"
