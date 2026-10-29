@@ -2,3 +2,6 @@
 *.tf text eol=lf
 *.hcl text eol=lf
 *.tfvars* text eol=lf
+# Zipped as-is into the Cognito email Lambda (infra/prod/email.tf); LF keeps
+# its source_code_hash the same on every checkout.
+src/esl/accounts/cognito_emails.py text eol=lf
